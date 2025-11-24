@@ -1,9 +1,14 @@
 'use client'
 
+'use client'
+
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { useFiscalYear } from '../contexts/FiscalYearContext'
+import Header from '../components/Header'
 import Image from 'next/image'
+import imageCompression from 'browser-image-compression'
 
 // カテゴリー定義
 const INCOME_CATEGORIES = [
@@ -27,6 +32,7 @@ const EXPENSE_CATEGORIES = [
 
 export default function RecordPage() {
   const router = useRouter()
+  const { currentFiscalYear } = useFiscalYear() 
   const [type, setType] = useState<'income' | 'expense' | 'transfer'>('expense')
   const [amount, setAmount] = useState('')
   const [description, setDescription] = useState('')
@@ -72,16 +78,32 @@ export default function RecordPage() {
 
   const uploadImage = async (file: File): Promise<string | null> => {
     try {
-      const fileExt = file.name.split('.').pop()
+      // 画像を圧縮
+      console.log('元のファイルサイズ:', (file.size / 1024 / 1024).toFixed(2), 'MB')
+      
+      const options = {
+        maxSizeMB: 0.1, // 最大100KB
+        maxWidthOrHeight: 1200, // 最大幅/高さ
+        useWebWorker: true,
+        fileType: 'image/jpeg', // JPEGに変換
+      }
+      
+      const compressedFile = await imageCompression(file, options)
+      console.log('圧縮後のファイルサイズ:', (compressedFile.size / 1024).toFixed(2), 'KB')
+
+      // ファイル名をユニークにする
+      const fileExt = 'jpg' // 常にJPEG
       const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`
       const filePath = `${fileName}`
 
+      // Supabase Storageにアップロード
       const { error: uploadError } = await supabase.storage
         .from('receipts')
-        .upload(filePath, file)
+        .upload(filePath, compressedFile)
 
       if (uploadError) throw uploadError
 
+      // 公開URLを取得
       const { data } = supabase.storage
         .from('receipts')
         .getPublicUrl(filePath)
@@ -149,6 +171,7 @@ export default function RecordPage() {
         transaction_date: transactionDate,
         recorded_by: userId,
         receipt_image_url: imageUrl,
+        fiscal_year_id: currentFiscalYear?.id,  // ←この行を追加
       }
 
       if (type === 'transfer') {
@@ -210,17 +233,13 @@ export default function RecordPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
-      <header className="bg-gradient-to-r from-emerald-500 to-teal-500 text-white p-4 shadow-lg">
-        <div className="container mx-auto max-w-4xl flex items-center">
-          <button onClick={() => router.push('/')} className="mr-4 text-2xl hover:bg-white/20 rounded-lg p-2 transition">
-            ←
-          </button>
-          <div>
-            <h1 className="text-2xl font-bold">記録する</h1>
-            <p className="text-emerald-100 text-sm">収支・移動を記録</p>
-          </div>
-        </div>
-      </header>
+      <Header
+        title="記録する"
+        subtitle="収支・移動を記録"
+        showBack={true}
+        colorFrom="emerald-500"
+        colorTo="teal-500"
+      />
 
       <main className="container mx-auto p-4 max-w-4xl">
         <form onSubmit={handleSubmit} className="bg-white rounded-lg shadow-md p-6">

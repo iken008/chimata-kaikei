@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
+import { useFiscalYear } from './contexts/FiscalYearContext'
+import Header from './components/Header'
 
 type Account = {
   id: number
@@ -25,16 +27,21 @@ type Transaction = {
 }
 
 export default function Home() {
+  const { currentFiscalYear, loading: fiscalYearLoading } = useFiscalYear()
   const [accounts, setAccounts] = useState<Account[]>([])
   const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([])
   const [monthlyStats, setMonthlyStats] = useState({ income: 0, expense: 0 })
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    fetchData()
-  }, [])
+    if (currentFiscalYear) {
+      fetchData()
+    }
+  }, [currentFiscalYear])
 
   const fetchData = async () => {
+    if (!currentFiscalYear) return
+
     try {
       // 口座残高を取得
       const { data: accountsData, error: accountsError } = await supabase
@@ -45,7 +52,7 @@ export default function Home() {
       if (accountsError) throw accountsError
       setAccounts(accountsData || [])
 
-      // 最近の取引を取得（削除されていないもの）
+      // 最近の取引を取得（削除されていない、現在の年度のもの）
       const { data: transactionsData, error: transactionsError } = await supabase
         .from('transactions')
         .select(`
@@ -53,13 +60,14 @@ export default function Home() {
           users (name)
         `)
         .eq('is_deleted', false)
+        .eq('fiscal_year_id', currentFiscalYear.id)
         .order('recorded_at', { ascending: false })
         .limit(5)
 
       if (transactionsError) throw transactionsError
       setRecentTransactions(transactionsData || [])
 
-      // 今月の収支を計算
+      // 今月の収支を計算（現在の年度内で）
       const now = new Date()
       const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
       const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59)
@@ -68,6 +76,7 @@ export default function Home() {
         .from('transactions')
         .select('type, amount')
         .eq('is_deleted', false)
+        .eq('fiscal_year_id', currentFiscalYear.id)
         .gte('recorded_at', startOfMonth.toISOString())
         .lte('recorded_at', endOfMonth.toISOString())
 
@@ -129,7 +138,7 @@ export default function Home() {
   const totalBalance = accounts.reduce((sum, account) => sum + Number(account.balance), 0)
   const monthlyBalance = monthlyStats.income - monthlyStats.expense
 
-  if (loading) {
+  if (loading || fiscalYearLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center">
         <p className="text-xl text-gray-600">読み込み中...</p>
@@ -140,12 +149,10 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
       {/* ヘッダー */}
-      <header className="bg-gradient-to-r from-indigo-500 to-purple-500 text-white p-6 shadow-lg">
-        <div className="container mx-auto max-w-4xl">
-          <h1 className="text-3xl font-bold text-center">ちまたの会計 mini</h1>
-          <p className="text-center text-indigo-100 text-sm mt-1">みんなで見張る、透明な会計</p>
-        </div>
-      </header>
+      <Header
+        title="ちまたの会計 mini"
+        subtitle="みんなで見張る、透明な会計"
+      />
 
       {/* メインコンテンツ */}
       <main className="container mx-auto p-4 max-w-4xl">
@@ -156,6 +163,15 @@ export default function Home() {
             <h2 className="text-xl font-bold text-gray-800">現在の残高</h2>
           </div>
           <div className="space-y-3">
+            {currentFiscalYear && (
+              <div className="mb-3 p-3 bg-blue-50 rounded-lg border border-blue-100">
+                <p className="text-sm text-blue-700 font-semibold mb-1">期首繰越金</p>
+                <div className="flex justify-between text-sm">
+                  <span>現金: {formatCurrency(Number(currentFiscalYear.starting_balance_cash))}</span>
+                  <span>銀行: {formatCurrency(Number(currentFiscalYear.starting_balance_bank))}</span>
+                </div>
+              </div>
+            )}
             {accounts.map((account) => (
               <div key={account.id} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
                 <span className="text-gray-600 font-medium">{account.name}:</span>

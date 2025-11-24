@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { useFiscalYear } from '../contexts/FiscalYearContext'
+import Header from '../components/Header'
 
 type Account = {
   id: number
@@ -22,16 +24,21 @@ type HistoryRecord = {
 
 export default function HistoryPage() {
   const router = useRouter()
+  const { currentFiscalYear } = useFiscalYear() 
   const [history, setHistory] = useState<HistoryRecord[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
   const [loading, setLoading] = useState(true)
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
   useEffect(() => {
-    fetchData()
-  }, [])
+    if (currentFiscalYear) {
+      fetchData()
+    }
+  }, [currentFiscalYear])
 
   const fetchData = async () => {
+    if (!currentFiscalYear) return
+
     try {
       // 口座データを取得
       const { data: accountsData } = await supabase
@@ -41,13 +48,28 @@ export default function HistoryPage() {
 
       setAccounts(accountsData || [])
 
-      // 履歴データを取得
+      // 現在の年度のトランザクションIDを取得
+      const { data: transactionIds } = await supabase
+        .from('transactions')
+        .select('id')
+        .eq('fiscal_year_id', currentFiscalYear.id)
+
+      const ids = transactionIds?.map(t => t.id) || []
+
+      if (ids.length === 0) {
+        setHistory([])
+        setLoading(false)
+        return
+      }
+
+      // 履歴データを取得（現在の年度の取引に関連するもののみ）
       const { data: historyData, error } = await supabase
         .from('transaction_history')
         .select(`
           *,
           users (name)
         `)
+        .in('transaction_id', ids)
         .order('changed_at', { ascending: false })
 
       if (error) throw error
@@ -169,17 +191,13 @@ export default function HistoryPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
-      <header className="bg-gradient-to-r from-amber-500 to-orange-500 text-white p-4 shadow-lg">
-        <div className="container mx-auto max-w-4xl flex items-center">
-          <button onClick={() => router.push('/')} className="mr-4 text-2xl hover:bg-white/20 rounded-lg p-2 transition">
-            ←
-          </button>
-          <div>
-            <h1 className="text-2xl font-bold">操作履歴</h1>
-            <p className="text-amber-100 text-sm">全ての操作を透明に記録</p>
-          </div>
-        </div>
-      </header>
+      <Header
+        title="操作履歴"
+        subtitle="全ての操作を透明に記録"
+        showBack={true}
+        colorFrom="amber-500"
+        colorTo="orange-500"
+      />
 
       <main className="container mx-auto p-4 max-w-4xl">
         {/* 説明 */}

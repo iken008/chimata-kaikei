@@ -1,0 +1,1021 @@
+'use client'
+
+import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import { supabase } from '@/lib/supabase'
+import { useFiscalYear } from '../contexts/FiscalYearContext'
+import Header from '../components/Header'
+import JSZip from 'jszip'
+
+type FiscalYear = {
+  id: number
+  name: string
+  start_date: string
+  end_date: string
+  starting_balance_cash: number
+  starting_balance_bank: number
+  is_current: boolean
+}
+
+type Category = {
+  id: number
+  name: string
+  type: 'income' | 'expense'
+  sort_order: number
+}
+
+type SettingsTab = 'fiscal' | 'category' | 'data'
+
+type StorageUsage = {
+  databaseSize: number
+  storageSize: number
+  imageCount: number
+}
+
+export default function SettingsPage() {
+  const router = useRouter()
+  const { allFiscalYears, currentFiscalYear, refreshFiscalYears } = useFiscalYear()
+  const [activeTab, setActiveTab] = useState<SettingsTab>('fiscal')
+  const [categories, setCategories] = useState<Category[]>([])
+  const [editingFiscalYear, setEditingFiscalYear] = useState<number | null>(null)
+  const [editingCategory, setEditingCategory] = useState<number | null>(null)
+  const [newCategoryName, setNewCategoryName] = useState('')
+  const [newCategoryType, setNewCategoryType] = useState<'income' | 'expense'>('income')
+  const [storageUsage, setStorageUsage] = useState<StorageUsage | null>(null)
+  const [loadingUsage, setLoadingUsage] = useState(false)
+
+  useEffect(() => {
+    fetchCategories()
+  }, [])
+
+  const fetchCategories = async () => {
+    const { data, error } = await supabase
+      .from('categories')
+      .select('*')
+      .order('type')
+      .order('sort_order')
+
+    if (error) {
+      console.error('Error fetching categories:', error)
+    } else {
+      setCategories(data || [])
+    }
+  }
+
+  const fetchStorageUsage = async () => {
+    setLoadingUsage(true)
+    try {
+      // トランザクション数を取得
+      const { count: txCount } = await supabase
+        .from('transactions')
+        .select('*', { count: 'exact', head: true })
+
+      // 履歴数を取得
+      const { count: historyCount } = await supabase
+        .from('transaction_history')
+        .select('*', { count: 'exact', head: true })
+
+      // 画像数を取得
+      const { data: images } = await supabase.storage
+        .from('receipts')
+        .list()
+
+      const imageCount = images?.length || 0
+
+      // 概算サイズ計算
+      const databaseSize = ((txCount || 0) * 1 + (historyCount || 0) * 2) / 1024 // MB
+      const storageSize = (imageCount * 100) / 1024 // MB
+
+      setStorageUsage({
+        databaseSize,
+        storageSize,
+        imageCount,
+      })
+    } catch (error) {
+      console.error('Error fetching storage usage:', error)
+    } finally {
+      setLoadingUsage(false)
+    }
+  }
+
+  // 年度情報の編集（名前、期間、期首残高）
+  const handleUpdateFiscalYear = async (
+    fiscalYearId: number,
+    name: string,
+    startDate: string,
+    endDate: string,
+    cashBalance: number,
+    bankBalance: number
+  ) => {
+    try {
+      const { error } = await supabase
+        .from('fiscal_years')
+        .update({
+          name,
+          start_date: startDate,
+          end_date: endDate,
+          starting_balance_cash: cashBalance,
+          starting_balance_bank: bankBalance,
+        })
+        .eq('id', fiscalYearId)
+
+      if (error) throw error
+
+      alert('年度情報を更新しました')
+      await refreshFiscalYears()
+      setEditingFiscalYear(null)
+    } catch (error) {
+      console.error('Error updating fiscal year:', error)
+      alert('エラーが発生しました')
+    }
+  }
+
+  // 年度の削除
+  const handleDeleteFiscalYear = async (fiscalYearId: number, fiscalYearName: string) => {
+    if (!confirm(`${fiscalYearName}を削除しますか？\n\nこの年度の全ての取引データも削除されます。この操作は取り消せません。`)) {
+      return
+    }
+
+    if (!confirm('本当に削除しますか？もう一度確認してください。')) {
+      return
+    }
+
+    try {
+      // トランザクションの削除
+      const { error: txError } = await supabase
+        .from('transactions')
+        .delete()
+        .eq('fiscal_year_id', fiscalYearId)
+
+      if (txError) throw txError
+
+      // 年度の削除
+      const { error: fyError } = await supabase
+        .from('fiscal_years')
+        .delete()
+        .eq('id', fiscalYearId)
+
+      if (fyError) throw fyError
+
+      alert('年度を削除しました')
+      await refreshFiscalYears()
+
+      // 削除した年度が現在選択中だった場合、ホームに戻る
+      if (currentFiscalYear?.id === fiscalYearId) {
+        router.push('/')
+      }
+    } catch (error) {
+      console.error('Error deleting fiscal year:', error)
+      alert('エラーが発生しました')
+    }
+  }
+
+  // カテゴリーの追加
+  const handleAddCategory = async () => {
+    if (!newCategoryName.trim()) {
+      alert('カテゴリー名を入力してください')
+      return
+    }
+
+    try {
+      // 最大のsort_orderを取得
+      const { data: maxData } = await supabase
+        .from('categories')
+        .select('sort_order')
+        .eq('type', newCategoryType)
+        .order('sort_order', { ascending: false })
+        .limit(1)
+
+      const maxOrder = maxData?.[0]?.sort_order || 0
+
+      const { error } = await supabase
+        .from('categories')
+        .insert({
+          name: newCategoryName,
+          type: newCategoryType,
+          sort_order: maxOrder + 1,
+        })
+
+      if (error) throw error
+
+      alert('カテゴリーを追加しました')
+      setNewCategoryName('')
+      await fetchCategories()
+    } catch (error) {
+      console.error('Error adding category:', error)
+      alert('エラーが発生しました')
+    }
+  }
+
+  // カテゴリー名の編集
+  const handleUpdateCategory = async (categoryId: number, newName: string) => {
+    if (!newName.trim()) {
+      alert('カテゴリー名を入力してください')
+      return
+    }
+
+    try {
+      const { error } = await supabase
+        .from('categories')
+        .update({ name: newName })
+        .eq('id', categoryId)
+
+      if (error) throw error
+
+      alert('カテゴリー名を更新しました')
+      setEditingCategory(null)
+      await fetchCategories()
+    } catch (error) {
+      console.error('Error updating category:', error)
+      alert('エラーが発生しました')
+    }
+  }
+
+  // カテゴリーの削除
+  const handleDeleteCategory = async (categoryId: number, categoryName: string) => {
+    if (!confirm(`「${categoryName}」を削除しますか？`)) {
+      return
+    }
+
+    try {
+      const { error } = await supabase
+        .from('categories')
+        .delete()
+        .eq('id', categoryId)
+
+      if (error) throw error
+
+      alert('カテゴリーを削除しました')
+      await fetchCategories()
+    } catch (error) {
+      console.error('Error deleting category:', error)
+      alert('エラーが発生しました')
+    }
+  }
+
+  const formatCurrency = (amount: number) => {
+    return amount.toLocaleString('ja-JP') + '円'
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
+      <Header
+        title="設定"
+        subtitle="年度・カテゴリーの管理"
+        showBack={true}
+        colorFrom="slate-700"
+        colorTo="slate-800"
+      />
+
+      <main className="container mx-auto p-4 max-w-4xl">
+        {/* タブ */}
+        <div className="bg-white rounded-t-xl shadow-md border-b border-gray-200">
+          <div className="flex">
+            <button
+              onClick={() => setActiveTab('fiscal')}
+              className={`flex-1 py-4 px-6 font-bold transition ${
+                activeTab === 'fiscal'
+                  ? 'bg-white text-indigo-600 border-b-2 border-indigo-600'
+                  : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              📅 年度管理
+            </button>
+            <button
+              onClick={() => setActiveTab('category')}
+              className={`flex-1 py-4 px-6 font-bold transition ${
+                activeTab === 'category'
+                  ? 'bg-white text-indigo-600 border-b-2 border-indigo-600'
+                  : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              🏷️ カテゴリー管理
+            </button>
+            <button
+              onClick={() => {
+                setActiveTab('data')
+                if (!storageUsage) fetchStorageUsage()
+              }}
+              className={`flex-1 py-4 px-6 font-bold transition ${
+                activeTab === 'data'
+                  ? 'bg-white text-indigo-600 border-b-2 border-indigo-600'
+                  : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              💾 データ管理
+            </button>
+          </div>
+        </div>
+
+        {/* コンテンツ */}
+        <div className="bg-white rounded-b-xl shadow-md p-6">
+          {activeTab === 'fiscal' && (
+            <div>
+              <h2 className="text-xl font-bold mb-4 text-gray-800">年度一覧</h2>
+              <div className="space-y-4">
+                {allFiscalYears.map((fy) => (
+                  <div
+                    key={fy.id}
+                    className={`border rounded-lg p-4 ${
+                      fy.id === currentFiscalYear?.id
+                        ? 'border-indigo-500 bg-indigo-50'
+                        : 'border-gray-200'
+                    }`}
+                  >
+                    <div className="flex justify-between items-start mb-3">
+                      <div>
+                        <h3 className="text-lg font-bold text-gray-800">
+                          {fy.name}
+                          {fy.id === currentFiscalYear?.id && (
+                            <span className="ml-2 text-xs bg-indigo-500 text-white px-2 py-1 rounded">
+                              現在
+                            </span>
+                          )}
+                        </h3>
+                        <p className="text-sm text-gray-600">
+                          {fy.start_date} 〜 {fy.end_date}
+                        </p>
+                      </div>
+                      {allFiscalYears.length > 1 && (
+                        <button
+                          onClick={() => handleDeleteFiscalYear(fy.id, fy.name)}
+                          className="text-red-500 hover:text-red-700 text-sm font-bold"
+                        >
+                          削除
+                        </button>
+                      )}
+                    </div>
+
+                    {editingFiscalYear === fy.id ? (
+                      <EditFiscalYearForm
+                        fiscalYear={fy}
+                        onSave={handleUpdateFiscalYear}
+                        onCancel={() => setEditingFiscalYear(null)}
+                      />
+                    ) : (
+                      <div>
+                        <div className="text-sm text-gray-700 mb-2">
+                          <p>期首繰越金:</p>
+                          <p className="ml-4">
+                            現金: {formatCurrency(Number(fy.starting_balance_cash))}
+                          </p>
+                          <p className="ml-4">
+                            銀行: {formatCurrency(Number(fy.starting_balance_bank))}
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => setEditingFiscalYear(fy.id)}
+                          className="text-sm text-indigo-600 hover:text-indigo-800 font-semibold"
+                        >
+                          編集
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'category' && (
+            <div>
+              <h2 className="text-xl font-bold mb-4 text-gray-800">カテゴリー管理</h2>
+
+              {/* 新しいカテゴリーを追加 */}
+              <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                <h3 className="font-bold mb-3 text-gray-800">新しいカテゴリーを追加</h3>
+                <div className="flex gap-3">
+                  <select
+                    value={newCategoryType}
+                    onChange={(e) => setNewCategoryType(e.target.value as 'income' | 'expense')}
+                    className="p-2 border border-gray-300 rounded"
+                  >
+                    <option value="income">収入</option>
+                    <option value="expense">支出</option>
+                  </select>
+                  <input
+                    type="text"
+                    value={newCategoryName}
+                    onChange={(e) => setNewCategoryName(e.target.value)}
+                    placeholder="カテゴリー名"
+                    className="flex-1 p-2 border border-gray-300 rounded"
+                  />
+                  <button
+                    onClick={handleAddCategory}
+                    className="px-4 py-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded font-bold"
+                  >
+                    追加
+                  </button>
+                </div>
+              </div>
+
+              {/* 収入カテゴリー */}
+              <div className="mb-6">
+                <h3 className="font-bold mb-3 text-emerald-700">収入カテゴリー</h3>
+                <div className="space-y-2">
+                  {categories
+                    .filter((c) => c.type === 'income')
+                    .map((category) => (
+                      <CategoryItem
+                        key={category.id}
+                        category={category}
+                        isEditing={editingCategory === category.id}
+                        onEdit={() => setEditingCategory(category.id)}
+                        onSave={(newName) => handleUpdateCategory(category.id, newName)}
+                        onCancel={() => setEditingCategory(null)}
+                        onDelete={() => handleDeleteCategory(category.id, category.name)}
+                      />
+                    ))}
+                </div>
+              </div>
+
+              {/* 支出カテゴリー */}
+              <div>
+                <h3 className="font-bold mb-3 text-rose-700">支出カテゴリー</h3>
+                <div className="space-y-2">
+                  {categories
+                    .filter((c) => c.type === 'expense')
+                    .map((category) => (
+                      <CategoryItem
+                        key={category.id}
+                        category={category}
+                        isEditing={editingCategory === category.id}
+                        onEdit={() => setEditingCategory(category.id)}
+                        onSave={(newName) => handleUpdateCategory(category.id, newName)}
+                        onCancel={() => setEditingCategory(null)}
+                        onDelete={() => handleDeleteCategory(category.id, category.name)}
+                      />
+                    ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'data' && (
+            <DataManagementView
+              storageUsage={storageUsage}
+              loadingUsage={loadingUsage}
+              onRefreshUsage={fetchStorageUsage}
+              allFiscalYears={allFiscalYears}
+              currentFiscalYear={currentFiscalYear}
+              onDeleteSuccess={refreshFiscalYears}
+            />
+          )}
+        </div>
+      </main>
+    </div>
+  )
+}
+
+// 年度編集フォーム（全項目編集可能）
+function EditFiscalYearForm({
+  fiscalYear,
+  onSave,
+  onCancel,
+}: {
+  fiscalYear: FiscalYear
+  onSave: (id: number, name: string, startDate: string, endDate: string, cash: number, bank: number) => void
+  onCancel: () => void
+}) {
+  const [name, setName] = useState(fiscalYear.name)
+  const [startDate, setStartDate] = useState(fiscalYear.start_date)
+  const [endDate, setEndDate] = useState(fiscalYear.end_date)
+  const [cash, setCash] = useState(fiscalYear.starting_balance_cash.toString())
+  const [bank, setBank] = useState(fiscalYear.starting_balance_bank.toString())
+
+  return (
+    <div className="bg-blue-50 p-4 rounded border border-blue-200">
+      <div className="space-y-3 mb-3">
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-1">年度名</label>
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="w-full p-2 border border-gray-300 rounded"
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-1">開始日</label>
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="w-full p-2 border border-gray-300 rounded"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-1">終了日</label>
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              className="w-full p-2 border border-gray-300 rounded"
+            />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-1">現金（期首）</label>
+            <input
+              type="number"
+              value={cash}
+              onChange={(e) => setCash(e.target.value)}
+              className="w-full p-2 border border-gray-300 rounded"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-1">銀行（期首）</label>
+            <input
+              type="number"
+              value={bank}
+              onChange={(e) => setBank(e.target.value)}
+              className="w-full p-2 border border-gray-300 rounded"
+            />
+          </div>
+        </div>
+      </div>
+      <div className="flex gap-2">
+        <button
+          onClick={() => onSave(fiscalYear.id, name, startDate, endDate, parseFloat(cash), parseFloat(bank))}
+          className="flex-1 px-3 py-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded font-bold text-sm"
+        >
+          保存
+        </button>
+        <button
+          onClick={onCancel}
+          className="flex-1 px-3 py-2 bg-gray-300 hover:bg-gray-400 text-gray-800 rounded font-bold text-sm"
+        >
+          キャンセル
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// カテゴリーアイテム
+function CategoryItem({
+  category,
+  isEditing,
+  onEdit,
+  onSave,
+  onCancel,
+  onDelete,
+}: {
+  category: Category
+  isEditing: boolean
+  onEdit: () => void
+  onSave: (newName: string) => void
+  onCancel: () => void
+  onDelete: () => void
+}) {
+  const [editName, setEditName] = useState(category.name)
+
+  if (isEditing) {
+    return (
+      <div className="flex gap-2 p-2 bg-blue-50 rounded border border-blue-200">
+        <input
+          type="text"
+          value={editName}
+          onChange={(e) => setEditName(e.target.value)}
+          className="flex-1 p-2 border border-gray-300 rounded"
+        />
+        <button
+          onClick={() => onSave(editName)}
+          className="px-3 py-1 bg-indigo-500 hover:bg-indigo-600 text-white rounded text-sm font-bold"
+        >
+          保存
+        </button>
+        <button
+          onClick={onCancel}
+          className="px-3 py-1 bg-gray-300 hover:bg-gray-400 text-gray-800 rounded text-sm font-bold"
+        >
+          キャンセル
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex justify-between items-center p-3 bg-gray-50 rounded border border-gray-200">
+      <span className="font-medium text-gray-800">{category.name}</span>
+      <div className="flex gap-2">
+        <button
+          onClick={onEdit}
+          className="text-indigo-600 hover:text-indigo-800 text-sm font-semibold"
+        >
+          編集
+        </button>
+        <button
+          onClick={onDelete}
+          className="text-red-500 hover:text-red-700 text-sm font-semibold"
+        >
+          削除
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// データ管理ビュー
+function DataManagementView({
+  storageUsage,
+  loadingUsage,
+  onRefreshUsage,
+  allFiscalYears,
+  currentFiscalYear,
+  onDeleteSuccess,
+}: {
+  storageUsage: StorageUsage | null
+  loadingUsage: boolean
+  onRefreshUsage: () => void
+  allFiscalYears: any[]
+  currentFiscalYear: any
+  onDeleteSuccess: () => void
+}) {
+  const [archiving, setArchiving] = useState<number | null>(null)
+  const [deleting, setDeleting] = useState<number | null>(null)
+
+  // 年度のアーカイブ（CSV+画像をZIPにまとめる）
+  const handleArchiveFiscalYear = async (fiscalYearId: number, fiscalYearName: string) => {
+    setArchiving(fiscalYearId)
+
+    try {
+      // トランザクションデータを取得
+      const { data: transactions, error: txError } = await supabase
+        .from('transactions')
+        .select(`
+          *,
+          users (name)
+        `)
+        .eq('fiscal_year_id', fiscalYearId)
+        .order('recorded_at', { ascending: true })
+
+      if (txError) throw txError
+
+      if (!transactions || transactions.length === 0) {
+        alert('この年度には取引データがありません')
+        setArchiving(null)
+        return
+      }
+
+      // CSVデータを作成（BOM付きで文字化け対策）
+      const csvHeader = '日付,種類,カテゴリー,金額,内容,口座,記入者,領収書ファイル名\n'
+      const csvRows = (transactions || []).map((t: any) => {
+        const date = new Date(t.recorded_at).toLocaleDateString('ja-JP')
+        const type = t.type === 'income' ? '収入' : t.type === 'expense' ? '支出' : '移動'
+        const category = t.category || ''
+        const amount = t.amount
+        const description = t.description
+        const account = t.type === 'transfer' 
+          ? `${t.from_account_id}→${t.to_account_id}` 
+          : t.account_id
+        const user = t.users?.name || ''
+        
+        // 画像URLからファイル名を抽出
+        let imageFileName = ''
+        if (t.receipt_image_url) {
+          const url = new URL(t.receipt_image_url)
+          imageFileName = url.pathname.split('/').pop() || ''
+        }
+
+        return `${date},${type},${category},${amount},${description},${account},${user},${imageFileName}`
+      }).join('\n')
+
+      // BOM（Byte Order Mark）を追加して文字化け対策
+      const csvContent = '\uFEFF' + csvHeader + csvRows
+
+      // ZIPファイルを作成
+      const zip = new JSZip()
+
+      // CSVをZIPに追加
+      zip.file('取引データ.csv', csvContent)
+
+      // 画像がある場合、ZIPに追加
+      const imagesWithUrls = transactions?.filter((t: any) => t.receipt_image_url) || []
+
+      if (imagesWithUrls.length > 0) {
+        alert(
+          `アーカイブを作成しています...\n\n` +
+          `取引データ: ${transactions.length}件\n` +
+          `領収書画像: ${imagesWithUrls.length}枚\n\n` +
+          `画像のダウンロード中です。しばらくお待ちください。`
+        )
+
+        // 領収書フォルダを作成
+        const receiptsFolder = zip.folder('領収書')
+        
+        let successCount = 0
+        let failCount = 0
+
+        // 画像を順番にダウンロードしてZIPに追加
+        for (const transaction of imagesWithUrls) {
+          try {
+            const imageUrl = transaction.receipt_image_url
+            const fileName = new URL(imageUrl).pathname.split('/').pop() || `image_${transaction.id}.jpg`
+
+            // 画像をfetchで取得
+            const response = await fetch(imageUrl)
+            if (!response.ok) throw new Error('Image fetch failed')
+
+            const blob = await response.blob()
+            receiptsFolder?.file(fileName, blob)
+            successCount++
+          } catch (error) {
+            console.error('Error downloading image:', error)
+            failCount++
+          }
+        }
+
+        // ZIPファイルを生成してダウンロード
+        const zipBlob = await zip.generateAsync({ 
+          type: 'blob',
+          compression: 'DEFLATE',
+          compressionOptions: { level: 6 }
+        })
+        
+        const zipLink = document.createElement('a')
+        const zipUrl = URL.createObjectURL(zipBlob)
+        zipLink.setAttribute('href', zipUrl)
+        zipLink.setAttribute('download', `${fiscalYearName}_アーカイブ.zip`)
+        zipLink.style.visibility = 'hidden'
+        document.body.appendChild(zipLink)
+        zipLink.click()
+        document.body.removeChild(zipLink)
+
+        if (failCount > 0) {
+          alert(
+            `アーカイブが完了しました！\n\n` +
+            `📦 ${fiscalYearName}_アーカイブ.zip\n\n` +
+            `含まれる内容：\n` +
+            `✅ 取引データ.csv (${transactions.length}件)\n` +
+            `✅ 領収書フォルダ (${successCount}枚)\n` +
+            `⚠️ ダウンロード失敗: ${failCount}枚`
+          )
+        } else {
+          alert(
+            `アーカイブが完了しました！\n\n` +
+            `📦 ${fiscalYearName}_アーカイブ.zip\n\n` +
+            `含まれる内容：\n` +
+            `✅ 取引データ.csv (${transactions.length}件)\n` +
+            `✅ 領収書フォルダ (${successCount}枚)`
+          )
+        }
+      } else {
+        // 画像がない場合もZIPで配布
+        const zipBlob = await zip.generateAsync({ type: 'blob' })
+        
+        const zipLink = document.createElement('a')
+        const zipUrl = URL.createObjectURL(zipBlob)
+        zipLink.setAttribute('href', zipUrl)
+        zipLink.setAttribute('download', `${fiscalYearName}_アーカイブ.zip`)
+        zipLink.style.visibility = 'hidden'
+        document.body.appendChild(zipLink)
+        zipLink.click()
+        document.body.removeChild(zipLink)
+
+        alert(
+          `アーカイブが完了しました！\n\n` +
+          `📦 ${fiscalYearName}_アーカイブ.zip\n\n` +
+          `含まれる内容：\n` +
+          `✅ 取引データ.csv (${transactions.length}件)\n` +
+          `（この年度には領収書画像がありません）`
+        )
+      }
+
+    } catch (error) {
+      console.error('Error archiving:', error)
+      alert('エラーが発生しました')
+    } finally {
+      setArchiving(null)
+    }
+  }
+
+  // 年度データの完全削除
+  const handleDeleteFiscalYearData = async (fiscalYearId: number, fiscalYearName: string) => {
+    if (!confirm(
+      `${fiscalYearName}のデータを完全に削除しますか？\n\n` +
+      `削除されるデータ：\n` +
+      `- 全ての取引データ\n` +
+      `- 全ての履歴データ\n` +
+      `- 全ての領収書画像\n\n` +
+      `⚠️ この操作は取り消せません！\n` +
+      `事前にアーカイブを作成することを強く推奨します。`
+    )) {
+      return
+    }
+
+    if (!confirm('本当に削除しますか？最終確認です。')) {
+      return
+    }
+
+    setDeleting(fiscalYearId)
+
+    try {
+      // 画像URLを取得して削除
+      const { data: transactions } = await supabase
+        .from('transactions')
+        .select('receipt_image_url')
+        .eq('fiscal_year_id', fiscalYearId)
+
+      const imageUrls = transactions
+        ?.filter((t: any) => t.receipt_image_url)
+        .map((t: any) => {
+          const url = new URL(t.receipt_image_url)
+          return url.pathname.split('/').pop()
+        })
+        .filter(Boolean) || []
+
+      // 画像を削除
+      if (imageUrls.length > 0) {
+        await supabase.storage
+          .from('receipts')
+          .remove(imageUrls as string[])
+      }
+
+      // 履歴を削除（トランザクションIDから）
+      const { data: txIds } = await supabase
+        .from('transactions')
+        .select('id')
+        .eq('fiscal_year_id', fiscalYearId)
+
+      const ids = txIds?.map(t => t.id) || []
+
+      if (ids.length > 0) {
+        await supabase
+          .from('transaction_history')
+          .delete()
+          .in('transaction_id', ids)
+      }
+
+      // トランザクションを削除
+      await supabase
+        .from('transactions')
+        .delete()
+        .eq('fiscal_year_id', fiscalYearId)
+
+      // 年度を削除
+      await supabase
+        .from('fiscal_years')
+        .delete()
+        .eq('id', fiscalYearId)
+
+      alert('データを削除しました')
+      onDeleteSuccess()
+      onRefreshUsage()
+
+      // 削除した年度が現在選択中だった場合、ホームに戻る
+      if (currentFiscalYear?.id === fiscalYearId) {
+        window.location.href = '/'
+      }
+    } catch (error) {
+      console.error('Error deleting:', error)
+      alert('エラーが発生しました')
+    } finally {
+      setDeleting(null)
+    }
+  }
+
+  const formatCurrency = (amount: number) => {
+    return amount.toLocaleString('ja-JP') + '円'
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* 容量使用状況 */}
+      <div>
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-xl font-bold text-gray-800">容量使用状況</h2>
+          <button
+            onClick={onRefreshUsage}
+            disabled={loadingUsage}
+            className="text-sm text-indigo-600 hover:text-indigo-800 font-semibold"
+          >
+            🔄 更新
+          </button>
+        </div>
+
+        {loadingUsage ? (
+          <p className="text-gray-500 text-center py-4">読み込み中...</p>
+        ) : storageUsage ? (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
+              <p className="text-sm text-blue-700 font-semibold mb-1">データベース</p>
+              <p className="text-2xl font-bold text-blue-600">
+                {storageUsage.databaseSize.toFixed(1)} MB
+              </p>
+              <p className="text-xs text-blue-600 mt-1">上限: 500 MB</p>
+              <div className="mt-2 bg-blue-200 rounded-full h-2">
+                <div
+                  className="bg-blue-600 h-2 rounded-full"
+                  style={{ width: `${Math.min((storageUsage.databaseSize / 500) * 100, 100)}%` }}
+                />
+              </div>
+            </div>
+
+            <div className="bg-green-50 rounded-lg p-4 border border-green-200">
+              <p className="text-sm text-green-700 font-semibold mb-1">ストレージ（画像）</p>
+              <p className="text-2xl font-bold text-green-600">
+                {storageUsage.storageSize.toFixed(1)} MB
+              </p>
+              <p className="text-xs text-green-600 mt-1">上限: 1024 MB</p>
+              <div className="mt-2 bg-green-200 rounded-full h-2">
+                <div
+                  className="bg-green-600 h-2 rounded-full"
+                  style={{ width: `${Math.min((storageUsage.storageSize / 1024) * 100, 100)}%` }}
+                />
+              </div>
+            </div>
+
+            <div className="bg-purple-50 rounded-lg p-4 border border-purple-200">
+              <p className="text-sm text-purple-700 font-semibold mb-1">領収書画像</p>
+              <p className="text-2xl font-bold text-purple-600">
+                {storageUsage.imageCount} 枚
+              </p>
+              <p className="text-xs text-purple-600 mt-1">
+                平均 {storageUsage.imageCount > 0 ? ((storageUsage.storageSize * 1024) / storageUsage.imageCount).toFixed(0) : 0} KB/枚
+              </p>
+            </div>
+          </div>
+        ) : (
+          <button
+            onClick={onRefreshUsage}
+            className="w-full py-3 bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg font-bold"
+          >
+            容量を確認する
+          </button>
+        )}
+      </div>
+
+      {/* アーカイブと削除 */}
+      <div>
+        <h2 className="text-xl font-bold mb-4 text-gray-800">年度別データ管理</h2>
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
+          <p className="text-sm text-yellow-800">
+            💡 <strong>推奨：</strong>前年度と今年度のみ保持し、古い年度はアーカイブ後に削除することで容量を節約できます。
+          </p>
+        </div>
+
+        <div className="space-y-4">
+          {allFiscalYears.map((fy) => (
+            <div
+              key={fy.id}
+              className={`border rounded-lg p-4 ${
+                fy.id === currentFiscalYear?.id
+                  ? 'border-indigo-500 bg-indigo-50'
+                  : 'border-gray-200'
+              }`}
+            >
+              <div className="flex justify-between items-center">
+                <div>
+                  <h3 className="text-lg font-bold text-gray-800">
+                    {fy.name}
+                    {fy.id === currentFiscalYear?.id && (
+                      <span className="ml-2 text-xs bg-indigo-500 text-white px-2 py-1 rounded">
+                        現在
+                      </span>
+                    )}
+                  </h3>
+                  <p className="text-sm text-gray-600">
+                    {fy.start_date} 〜 {fy.end_date}
+                  </p>
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handleArchiveFiscalYear(fy.id, fy.name)}
+                    disabled={archiving === fy.id}
+                    className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded font-bold text-sm disabled:bg-gray-400"
+                  >
+                    {archiving === fy.id ? '処理中...' : '📦 アーカイブ'}
+                  </button>
+
+                  {allFiscalYears.length > 1 && fy.id !== currentFiscalYear?.id && (
+                    <button
+                      onClick={() => handleDeleteFiscalYearData(fy.id, fy.name)}
+                      disabled={deleting === fy.id}
+                      className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded font-bold text-sm disabled:bg-gray-400"
+                    >
+                      {deleting === fy.id ? '削除中...' : '🗑️ 完全削除'}
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* 説明 */}
+      <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+        <h3 className="font-bold mb-2 text-gray-800">📖 使い方</h3>
+        <ol className="text-sm text-gray-700 space-y-1 list-decimal list-inside">
+          <li><strong>アーカイブ：</strong>年度データをCSVファイルでダウンロード（画像URLを含む）</li>
+          <li><strong>完全削除：</strong>データベースとストレージから完全に削除（容量を解放）</li>
+          <li><strong>推奨運用：</strong>古い年度は「アーカイブ → 削除」の順で実行</li>
+        </ol>
+      </div>
+    </div>
+  )
+}
