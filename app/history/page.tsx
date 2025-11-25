@@ -13,7 +13,9 @@ type Account = {
 
 type HistoryRecord = {
   id: string
+  transaction_id: string
   action: string
+  changed_by: string
   changed_at: string
   old_data: any
   new_data: any
@@ -24,23 +26,24 @@ type HistoryRecord = {
 
 export default function HistoryPage() {
   const router = useRouter()
-  const { currentFiscalYear } = useFiscalYear() 
+  const { currentFiscalYear } = useFiscalYear()
   const [history, setHistory] = useState<HistoryRecord[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
   const [loading, setLoading] = useState(true)
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [showDeleted, setShowDeleted] = useState(false)
+  const [deletedTransactions, setDeletedTransactions] = useState<any[]>([])
 
   useEffect(() => {
     if (currentFiscalYear) {
       fetchData()
     }
-  }, [currentFiscalYear])
+  }, [currentFiscalYear, showDeleted])
 
   const fetchData = async () => {
     if (!currentFiscalYear) return
 
     try {
-      // 口座データを取得
       const { data: accountsData } = await supabase
         .from('accounts')
         .select('*')
@@ -58,11 +61,12 @@ export default function HistoryPage() {
 
       if (ids.length === 0) {
         setHistory([])
+        setDeletedTransactions([])
         setLoading(false)
         return
       }
 
-      // 履歴データを取得（現在の年度の取引に関連するもののみ）
+      // 履歴データを取得
       const { data: historyData, error } = await supabase
         .from('transaction_history')
         .select(`
@@ -74,10 +78,120 @@ export default function HistoryPage() {
 
       if (error) throw error
       setHistory(historyData || [])
+
+      // 削除済み取引を取得（showDeletedがtrueの場合）
+      if (showDeleted) {
+        const { data: deletedData } = await supabase
+          .from('transactions')
+          .select(`
+            *,
+            users (name)
+          `)
+          .eq('fiscal_year_id', currentFiscalYear.id)
+          .eq('is_deleted', true)
+          .order('deleted_at', { ascending: false })
+
+        setDeletedTransactions(deletedData || [])
+      } else {
+        setDeletedTransactions([])
+      }
     } catch (error) {
       console.error('Error fetching history:', error)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleRestore = async (transaction: any) => {
+    const userName = prompt('あなたの名前を入力してください（復元操作の記録用）:')
+    if (!userName) return
+
+    if (!confirm(`「${transaction.description}」を復元しますか？\n\n残高も元に戻ります。`)) {
+      return
+    }
+
+    try {
+      // ユーザーを取得または作成
+      let userId: string
+
+      const { data: existingUser } = await supabase
+        .from('users')
+        .select('id')
+        .eq('name', userName)
+        .single()
+
+      if (existingUser) {
+        userId = existingUser.id
+      } else {
+        // 新規ユーザーを作成
+        const { data: newUser, error: userError } = await supabase
+          .from('users')
+          .insert({ name: userName })
+          .select('id')
+          .single()
+
+        if (userError) throw userError
+        if (!newUser) throw new Error('ユーザーの作成に失敗しました')
+        
+        userId = newUser.id
+      }
+
+      // 取引を復元（is_deleted = false に戻す）
+      const { error: updateError } = await supabase
+        .from('transactions')
+        .update({
+          is_deleted: false,
+          deleted_at: null,
+        })
+        .eq('id', transaction.id)
+
+      if (updateError) throw updateError
+
+      // 履歴に復元操作を記録
+      const { error: historyError } = await supabase
+        .from('transaction_history')
+        .insert({
+          transaction_id: transaction.id,
+          action: 'restored',
+          changed_by: userId,
+          changed_at: new Date().toISOString(),
+          old_data: { ...transaction, is_deleted: true, deleted_at: transaction.deleted_at },
+          new_data: { ...transaction, is_deleted: false, deleted_at: null },
+        })
+
+      if (historyError) {
+        console.error('History insert error:', historyError)
+        alert(`履歴の記録に失敗しました: ${JSON.stringify(historyError)}`)  // ← エラー内容を表示
+        // 履歴の記録に失敗しても復元は成功させる
+      }
+
+      // 残高を元に戻す
+      if (transaction.type === 'income') {
+        await supabase.rpc('update_balance', {
+          account_id: transaction.account_id,
+          change_amount: transaction.amount,
+        })
+      } else if (transaction.type === 'expense') {
+        await supabase.rpc('update_balance', {
+          account_id: transaction.account_id,
+          change_amount: -transaction.amount,
+        })
+      } else if (transaction.type === 'transfer') {
+        await supabase.rpc('update_balance', {
+          account_id: transaction.from_account_id,
+          change_amount: -transaction.amount,
+        })
+        await supabase.rpc('update_balance', {
+          account_id: transaction.to_account_id,
+          change_amount: transaction.amount,
+        })
+      }
+
+      alert('復元しました')
+      fetchData()
+    } catch (error) {
+      console.error('Error restoring:', error)
+      alert('復元に失敗しました')
     }
   }
 
@@ -95,6 +209,7 @@ export default function HistoryPage() {
       case 'created': return '作成'
       case 'updated': return '編集'
       case 'deleted': return '削除'
+      case 'restored': return '復元'
       default: return action
     }
   }
@@ -102,18 +217,10 @@ export default function HistoryPage() {
   const getActionColor = (action: string) => {
     switch (action) {
       case 'created': return 'bg-green-100 text-green-800'
-      case 'updated': return 'bg-yellow-100 text-yellow-800'
+      case 'updated': return 'bg-blue-100 text-blue-800'
       case 'deleted': return 'bg-red-100 text-red-800'
+      case 'restored': return 'bg-purple-100 text-purple-800'
       default: return 'bg-gray-100 text-gray-800'
-    }
-  }
-
-  const getTypeLabel = (type: string) => {
-    switch (type) {
-      case 'income': return '収入'
-      case 'expense': return '支出'
-      case 'transfer': return '移動'
-      default: return type
     }
   }
 
@@ -122,63 +229,17 @@ export default function HistoryPage() {
     return account?.name || '不明'
   }
 
-  const renderTransactionData = (data: any) => {
-    if (!data) return null
+  const getTransactionDisplay = (data: any) => {
+    if (!data) return '（データなし）'
 
-    return (
-      <div className="mt-2 p-3 bg-gray-50 rounded text-sm">
-        <p><strong>種類:</strong> {getTypeLabel(data.type)}</p>
-        <p><strong>金額:</strong> {formatCurrency(data.amount)}</p>
-        <p><strong>内容:</strong> {data.description}</p>
-        {data.type === 'transfer' ? (
-          <p>
-            <strong>移動:</strong> {getAccountName(data.from_account_id)} → {getAccountName(data.to_account_id)}
-          </p>
-        ) : (
-          <p><strong>口座:</strong> {getAccountName(data.account_id)}</p>
-        )}
-      </div>
-    )
-  }
-
-  const renderChanges = (record: HistoryRecord) => {
-    if (record.action === 'created') {
-      return (
-        <div>
-          <p className="font-semibold text-green-700 mb-2">✅ 新規作成</p>
-          {renderTransactionData(record.new_data)}
-        </div>
-      )
+    if (data.type === 'income') {
+      return `収入: ${data.description} - ${formatCurrency(data.amount)} [${getAccountName(data.account_id)}]`
+    } else if (data.type === 'expense') {
+      return `支出: ${data.description} - ${formatCurrency(data.amount)} [${getAccountName(data.account_id)}]`
+    } else if (data.type === 'transfer') {
+      return `移動: ${data.description} - ${formatCurrency(data.amount)} [${getAccountName(data.from_account_id)}→${getAccountName(data.to_account_id)}]`
     }
-
-    if (record.action === 'deleted') {
-      return (
-        <div>
-          <p className="font-semibold text-red-700 mb-2">❌ 削除された取引</p>
-          {renderTransactionData(record.old_data)}
-        </div>
-      )
-    }
-
-    if (record.action === 'updated') {
-      return (
-        <div>
-          <p className="font-semibold text-yellow-700 mb-2">✏️ 変更内容</p>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <p className="font-semibold text-gray-600 mb-1">変更前:</p>
-              {renderTransactionData(record.old_data)}
-            </div>
-            <div>
-              <p className="font-semibold text-gray-600 mb-1">変更後:</p>
-              {renderTransactionData(record.new_data)}
-            </div>
-          </div>
-        </div>
-      )
-    }
-
-    return null
+    return '（不明）'
   }
 
   if (loading) {
@@ -200,63 +261,118 @@ export default function HistoryPage() {
       />
 
       <main className="container mx-auto p-4 max-w-4xl">
-        {/* 説明 */}
-        <div className="bg-blue-50 border-l-4 border-blue-500 p-4 mb-6 rounded">
-          <p className="text-blue-900 font-semibold">🔍 透明性の確保</p>
-          <p className="text-blue-800 text-sm mt-1">
-            全ての操作（作成・編集・削除）が記録されています。誰が何をしたか、全員が確認できます。
-          </p>
+        {/* 削除済み表示トグル */}
+        <div className="bg-white rounded-xl shadow-md p-4 mb-4 border border-gray-100">
+          <label className="flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              checked={showDeleted}
+              onChange={(e) => setShowDeleted(e.target.checked)}
+              className="w-5 h-5 mr-3 cursor-pointer"
+            />
+            <span className="font-semibold text-gray-800">削除済みの取引を表示</span>
+          </label>
         </div>
 
-        {/* 履歴一覧 */}
-        <div className="bg-white rounded-lg shadow-md p-6">
-          <h2 className="text-xl font-bold mb-4">
-            全操作履歴（{history.length}件）
-          </h2>
+        {/* 削除済み取引（復元可能） */}
+        {showDeleted && deletedTransactions.length > 0 && (
+          <div className="bg-white rounded-xl shadow-md p-6 mb-6 border border-gray-100">
+            <div className="flex items-center mb-4">
+              <span className="text-2xl mr-2">🗑️</span>
+              <h2 className="text-xl font-bold text-gray-800">削除済みの取引</h2>
+            </div>
+
+            <div className="space-y-3">
+              {deletedTransactions.map((transaction) => (
+                <div
+                  key={transaction.id}
+                  className="border border-red-200 rounded-lg p-4 bg-red-50"
+                >
+                  <div className="flex justify-between items-start mb-2">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="bg-red-200 text-red-800 text-xs font-semibold px-2 py-1 rounded">
+                          削除済み
+                        </span>
+                        <span className="text-sm text-gray-500">
+                          {formatDateTime(transaction.deleted_at || transaction.recorded_at)}
+                        </span>
+                      </div>
+                      <p className="font-bold text-lg">{getTransactionDisplay(transaction)}</p>
+                      <p className="text-sm text-gray-600">
+                        記入者: {transaction.users?.name || '不明'}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => handleRestore(transaction)}
+                      className="px-4 py-2 bg-purple-500 hover:bg-purple-600 text-white rounded font-bold text-sm transition"
+                    >
+                      復元
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 操作履歴 */}
+        <div className="bg-white rounded-xl shadow-md p-6 border border-gray-100">
+          <div className="flex items-center mb-4">
+            <span className="text-2xl mr-2">📋</span>
+            <h2 className="text-xl font-bold text-gray-800">操作履歴</h2>
+          </div>
 
           {history.length === 0 ? (
-            <p className="text-gray-500 text-center py-4">履歴がありません</p>
+            <p className="text-gray-500 text-center py-8">履歴がありません</p>
           ) : (
-            <div className="space-y-4">
+            <div className="space-y-3">
               {history.map((record) => (
                 <div
                   key={record.id}
-                  className="border rounded-lg p-4 hover:bg-gray-50 cursor-pointer"
-                  onClick={() => setExpandedId(expandedId === record.id ? null : record.id)}
+                  className="border rounded-lg p-4 hover:bg-gray-50 transition"
                 >
                   <div className="flex justify-between items-start">
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-2">
-                        <span className={`text-xs font-semibold px-3 py-1 rounded ${getActionColor(record.action)}`}>
+                        <span className={`text-xs font-semibold px-2 py-1 rounded ${getActionColor(record.action)}`}>
                           {getActionLabel(record.action)}
                         </span>
                         <span className="text-sm text-gray-500">
                           {formatDateTime(record.changed_at)}
                         </span>
+                        <span className="text-sm text-gray-600">
+                          by {record.users.name}
+                        </span>
                       </div>
-                      
-                      <p className="font-bold text-lg mb-1">
-                        {record.users.name} が{getActionLabel(record.action)}
-                      </p>
-                      
-                      <p className="text-sm text-gray-600">
-                        {record.new_data?.description || record.old_data?.description || '取引'}
-                        {' - '}
-                        {formatCurrency(record.new_data?.amount || record.old_data?.amount || 0)}
-                      </p>
-                    </div>
-                    
-                    <button className="text-blue-600 text-sm font-semibold">
-                      {expandedId === record.id ? '▼ 閉じる' : '▶ 詳細'}
-                    </button>
-                  </div>
 
-                  {/* 展開された詳細 */}
-                  {expandedId === record.id && (
-                    <div className="mt-4 pt-4 border-t">
-                      {renderChanges(record)}
+                      <p className="text-gray-800">
+                        {getTransactionDisplay(record.new_data || record.old_data)}
+                      </p>
+
+                      {record.action === 'updated' && (
+                        <button
+                          onClick={() => setExpandedId(expandedId === record.id ? null : record.id)}
+                          className="text-sm text-blue-600 hover:text-blue-800 mt-2"
+                        >
+                          {expandedId === record.id ? '▼ 詳細を隠す' : '▶ 詳細を見る'}
+                        </button>
+                      )}
+
+                      {expandedId === record.id && record.action === 'updated' && (
+                        <div className="mt-3 p-3 bg-gray-50 rounded border border-gray-200 text-sm">
+                          <div className="mb-2">
+                            <span className="font-semibold text-red-600">変更前:</span>
+                            <p className="ml-4">{getTransactionDisplay(record.old_data)}</p>
+                          </div>
+                          <div>
+                            <span className="font-semibold text-green-600">変更後:</span>
+                            <p className="ml-4">{getTransactionDisplay(record.new_data)}</p>
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  )}
+                  </div>
                 </div>
               ))}
             </div>

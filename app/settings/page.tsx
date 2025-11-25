@@ -45,8 +45,8 @@ export default function SettingsPage() {
   const [loadingUsage, setLoadingUsage] = useState(false)
 
   useEffect(() => {
-    fetchCategories()
-  }, [])
+    console.log('allFiscalYears:', allFiscalYears)
+  }, [allFiscalYears])
 
   const fetchCategories = async () => {
     const { data, error } = await supabase
@@ -660,39 +660,237 @@ function DataManagementView({
         return
       }
 
-      // CSVデータを作成（BOM付きで文字化け対策）
-      const csvHeader = '日付,種類,カテゴリー,金額,内容,口座,記入者,領収書ファイル名\n'
-      const csvRows = (transactions || []).map((t: any) => {
-        const date = new Date(t.recorded_at).toLocaleDateString('ja-JP')
+      // 口座情報を取得
+      const { data: accountsData } = await supabase
+        .from('accounts')
+        .select('*')
+        .order('id')
+
+      const accounts = accountsData || []
+      const getAccountName = (accountId: number | null) => {
+        const account = accounts.find(a => a.id === accountId)
+        return account?.name || '不明'
+      }
+
+      // 年度情報を取得（繰越金）
+      const { data: fiscalYearData } = await supabase
+        .from('fiscal_years')
+        .select('*')
+        .eq('id', fiscalYearId)
+        .single()
+
+      const startingBalance = fiscalYearData 
+        ? Number(fiscalYearData.starting_balance_cash) + Number(fiscalYearData.starting_balance_bank)
+        : 0
+
+      // 領収書番号のマッピングを作成
+      let receiptCounter = 1
+      const receiptNoMap = new Map<string, number>()
+      const imageFileNameMap = new Map<string, string>() // 元のファイル名 -> 新しいファイル名
+
+      transactions.forEach((t: any) => {
+        if (t.receipt_image_url) {
+          const imageFileName = new URL(t.receipt_image_url).pathname.split('/').pop() || ''
+          if (!receiptNoMap.has(imageFileName)) {
+            const receiptNo = receiptCounter++
+            receiptNoMap.set(imageFileName, receiptNo)
+            // 拡張子を取得
+            const ext = imageFileName.split('.').pop() || 'jpg'
+            imageFileNameMap.set(imageFileName, `領収書${receiptNo}.${ext}`)
+          }
+        }
+      })
+
+      // === 1. 提出用CSV（出納帳形式）を作成 ===
+      const submitHeader = 'No,年,月,日,分類,摘要,領収書No,借方金額（収入）,貸方金額（支出）,差引残高\n'
+      
+      // 繰越金の行
+      const carryForwardRow = `,,,,繰越,,,,${startingBalance}\n`
+      
+      let balance = startingBalance
+
+      const submitRows = transactions.map((t: any, index: number) => {
+        const date = new Date(t.recorded_at)
+        const year = String(date.getFullYear()).slice(-2) // 24
+        const month = date.getMonth() + 1
+        const day = date.getDate()
+        
+        // 分類（カテゴリーを丸括弧で囲む）
+        let category = ''
+        if (t.type === 'income') {
+          category = `(入)${t.category || '収入'}`
+        } else if (t.type === 'expense') {
+          category = `(出)${t.category || '支出'}`
+        } else {
+          category = '(移)移動'
+        }
+
+        // 摘要（内容と口座情報）
+        let description = t.description
+        if (t.type === 'transfer') {
+          const fromAccount = getAccountName(t.from_account_id)
+          const toAccount = getAccountName(t.to_account_id)
+          description = `${t.description} (${fromAccount}→${toAccount})`
+        } else {
+          const accountName = getAccountName(t.account_id)
+          description = `${t.description} [${accountName}]`
+        }
+
+        // 領収書番号
+        let receiptNo = ''
+        if (t.receipt_image_url) {
+          const imageFileName = new URL(t.receipt_image_url).pathname.split('/').pop() || ''
+          receiptNo = String(receiptNoMap.get(imageFileName) || '')
+        }
+
+        // 金額と残高計算（数値のみ）
+        let debit = '' // 借方（収入）
+        let credit = '' // 貸方（支出）
+        
+        if (t.type === 'income') {
+          debit = String(t.amount)
+          balance += Number(t.amount)
+        } else if (t.type === 'expense') {
+          credit = String(t.amount)
+          balance -= Number(t.amount)
+        }
+
+  return `${index + 1},${year},${month},${day},${category},${description},${receiptNo},${debit},${credit},${balance}`
+}).join('\n')
+
+      const submitCsvContent = '\uFEFF' + submitHeader + carryForwardRow + submitRows
+
+      // === 2. 完全版CSV（全データ）を作成 ===
+      const fullHeader = '取引ID,日付,時刻,種類,カテゴリー,金額,内容,口座,記入者,領収書No,領収書ファイル名,記録日時\n'
+      const fullRows = transactions.map((t: any) => {
+        const date = new Date(t.recorded_at)
+        const dateStr = date.toLocaleDateString('ja-JP')
+        const timeStr = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
         const type = t.type === 'income' ? '収入' : t.type === 'expense' ? '支出' : '移動'
         const category = t.category || ''
         const amount = t.amount
         const description = t.description
-        const account = t.type === 'transfer' 
-          ? `${t.from_account_id}→${t.to_account_id}` 
-          : t.account_id
+        
+        let account = ''
+        if (t.type === 'transfer') {
+          account = `${getAccountName(t.from_account_id)}→${getAccountName(t.to_account_id)}`
+        } else {
+          account = getAccountName(t.account_id)
+        }
+        
         const user = t.users?.name || ''
         
-        // 画像URLからファイル名を抽出
-        let imageFileName = ''
+        let receiptNo = ''
+        let newImageFileName = ''
         if (t.receipt_image_url) {
-          const url = new URL(t.receipt_image_url)
-          imageFileName = url.pathname.split('/').pop() || ''
+          const originalFileName = new URL(t.receipt_image_url).pathname.split('/').pop() || ''
+          receiptNo = String(receiptNoMap.get(originalFileName) || '')
+          newImageFileName = imageFileNameMap.get(originalFileName) || ''
         }
+        
+        const recordedAt = new Date(t.recorded_at).toLocaleString('ja-JP')
 
-        return `${date},${type},${category},${amount},${description},${account},${user},${imageFileName}`
+        return `${t.id},${dateStr},${timeStr},${type},${category},${amount},${description},${account},${user},${receiptNo},${newImageFileName},${recordedAt}`
       }).join('\n')
 
-      // BOM（Byte Order Mark）を追加して文字化け対策
-      const csvContent = '\uFEFF' + csvHeader + csvRows
+      const fullCsvContent = '\uFEFF' + fullHeader + fullRows
+
+      // === 3. 決算報告書CSV を作成 ===
+      // カテゴリー別に集計
+      const incomeSummary: { [key: string]: number } = {}
+      const expenseSummary: { [key: string]: number } = {}
+      let totalIncome = 0
+      let totalExpense = 0
+
+      transactions.forEach((t: any) => {
+        if (t.type === 'income') {
+          const category = t.category || 'その他'
+          incomeSummary[category] = (incomeSummary[category] || 0) + Number(t.amount)
+          totalIncome += Number(t.amount)
+        } else if (t.type === 'expense') {
+          const category = t.category || 'その他'
+          expenseSummary[category] = (expenseSummary[category] || 0) + Number(t.amount)
+          totalExpense += Number(t.amount)
+        }
+      })
+
+      // 期末残高
+      const endingBalance = startingBalance + totalIncome - totalExpense
+
+      // 決算報告書CSV（金額は数値のみ、Excelで計算可能）
+      let statementCsv = '\uFEFF'
+
+      // 収入の部
+      statementCsv += '1. 収入\n'
+      statementCsv += '項目,金額,備考\n'
+
+      // 収入カテゴリー
+      Object.entries(incomeSummary).forEach(([category, amount]) => {
+        statementCsv += `${category},${amount},\n`
+      })
+
+      // 前年度からの繰越金
+      statementCsv += `前年度からの繰越金,${startingBalance},\n`
+
+      // 収入合計
+      const totalIncomeWithCarryover = totalIncome + startingBalance
+      statementCsv += `合計,${totalIncomeWithCarryover},\n`
+      statementCsv += '\n'
+
+      // 支出の部
+      statementCsv += '2. 支出\n'
+      statementCsv += '項目,金額,備考\n'
+
+      // 支出カテゴリー
+      Object.entries(expenseSummary).forEach(([category, amount]) => {
+        statementCsv += `${category},${amount},\n`
+      })
+
+      // 次年度への繰越金
+      statementCsv += `次年度への繰越金,${endingBalance},\n`
+
+      // 支出合計
+      const totalExpenseWithCarryover = totalExpense + endingBalance
+      statementCsv += `合計,${totalExpenseWithCarryover},\n`
+      statementCsv += '\n'
+      statementCsv += '★収入と支出が同額となるよう作成してください。\n'
 
       // ZIPファイルを作成
       const zip = new JSZip()
 
-      // CSVをZIPに追加
-      zip.file('取引データ.csv', csvContent)
+      // 3つのCSVをZIPに追加
+      zip.file('出納帳_提出用.csv', submitCsvContent)
+      zip.file('取引データ_完全版.csv', fullCsvContent)
+      zip.file('決算報告書.csv', statementCsv)
 
-      // 画像がある場合、ZIPに追加
+      // README（説明ファイル）を追加
+      const readme = 
+        `【アーカイブ内容】\n\n` +
+        `1. 出納帳_提出用.csv\n` +
+        `   - 会計年末調整用の提出フォーマット\n` +
+        `   - そのまま提出可能\n\n` +
+        `2. 決算報告書.csv\n` +
+        `   - カテゴリー別集計レポート\n` +
+        `   - 収支計算書形式\n\n` +
+        `3. 取引データ_完全版.csv\n` +
+        `   - 全ての情報を含む完全なデータ\n` +
+        `   - 内部管理・復元用\n` +
+        `   - 記入者、取引ID、領収書Noなどを含む\n\n` +
+        `4. 領収書フォルダ\n` +
+        `   - 領収書画像ファイル\n` +
+        `   - ファイル名: 領収書1.jpg, 領収書2.jpg...\n` +
+        `   - 完全版CSVの「領収書No」列と対応\n\n` +
+        `${fiscalYearName}\n` +
+        `取引件数: ${transactions.length}件\n` +
+        `収入合計: ¥${totalIncome.toLocaleString()}\n` +
+        `支出合計: ¥${totalExpense.toLocaleString()}\n` +
+        `期首残高: ¥${startingBalance.toLocaleString()}\n` +
+        `期末残高: ¥${endingBalance.toLocaleString()}\n` +
+        `作成日時: ${new Date().toLocaleString('ja-JP')}\n`
+
+      zip.file('README.txt', readme)
+
+      // 画像がある場合、ZIPに追加（新しいファイル名で）
       const imagesWithUrls = transactions?.filter((t: any) => t.receipt_image_url) || []
 
       if (imagesWithUrls.length > 0) {
@@ -709,18 +907,29 @@ function DataManagementView({
         let successCount = 0
         let failCount = 0
 
+        // 重複を避けるため、処理済みファイル名を記録
+        const processedFiles = new Set<string>()
+
         // 画像を順番にダウンロードしてZIPに追加
         for (const transaction of imagesWithUrls) {
           try {
             const imageUrl = transaction.receipt_image_url
-            const fileName = new URL(imageUrl).pathname.split('/').pop() || `image_${transaction.id}.jpg`
+            const originalFileName = new URL(imageUrl).pathname.split('/').pop() || ''
+            
+            // 既に処理済みならスキップ
+            if (processedFiles.has(originalFileName)) {
+              continue
+            }
+            processedFiles.add(originalFileName)
+
+            const newFileName = imageFileNameMap.get(originalFileName) || originalFileName
 
             // 画像をfetchで取得
             const response = await fetch(imageUrl)
             if (!response.ok) throw new Error('Image fetch failed')
 
             const blob = await response.blob()
-            receiptsFolder?.file(fileName, blob)
+            receiptsFolder?.file(newFileName, blob)
             successCount++
           } catch (error) {
             console.error('Error downloading image:', error)
@@ -749,8 +958,11 @@ function DataManagementView({
             `アーカイブが完了しました！\n\n` +
             `📦 ${fiscalYearName}_アーカイブ.zip\n\n` +
             `含まれる内容：\n` +
-            `✅ 取引データ.csv (${transactions.length}件)\n` +
+            `✅ 出納帳_提出用.csv\n` +
+            `✅ 決算報告書.csv\n` +
+            `✅ 取引データ_完全版.csv\n` +
             `✅ 領収書フォルダ (${successCount}枚)\n` +
+            `✅ README.txt\n` +
             `⚠️ ダウンロード失敗: ${failCount}枚`
           )
         } else {
@@ -758,8 +970,12 @@ function DataManagementView({
             `アーカイブが完了しました！\n\n` +
             `📦 ${fiscalYearName}_アーカイブ.zip\n\n` +
             `含まれる内容：\n` +
-            `✅ 取引データ.csv (${transactions.length}件)\n` +
-            `✅ 領収書フォルダ (${successCount}枚)`
+            `✅ 出納帳_提出用.csv（年末調整用）\n` +
+            `✅ 決算報告書.csv（収支計算書）\n` +
+            `✅ 取引データ_完全版.csv（内部管理用）\n` +
+            `✅ 領収書フォルダ (${successCount}枚)\n` +
+            `   ファイル名: 領収書1.jpg, 領収書2.jpg...\n` +
+            `✅ README.txt（説明ファイル）`
           )
         }
       } else {
@@ -779,7 +995,10 @@ function DataManagementView({
           `アーカイブが完了しました！\n\n` +
           `📦 ${fiscalYearName}_アーカイブ.zip\n\n` +
           `含まれる内容：\n` +
-          `✅ 取引データ.csv (${transactions.length}件)\n` +
+          `✅ 出納帳_提出用.csv（年末調整用）\n` +
+          `✅ 決算報告書.csv（収支計算書）\n` +
+          `✅ 取引データ_完全版.csv（内部管理用）\n` +
+          `✅ README.txt（説明ファイル）\n` +
           `（この年度には領収書画像がありません）`
         )
       }
