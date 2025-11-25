@@ -3,7 +3,11 @@
 import { useEffect, useState } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import Header from '@/app/components/Header'
 import Image from 'next/image'
+import imageCompression from 'browser-image-compression'
+import ProtectedRoute from '@/app/components/ProtectedRoute'
+import { useAuth } from '@/app/contexts/AuthContext'
 
 type Transaction = {
   id: string
@@ -21,6 +25,8 @@ export default function EditPage() {
   const router = useRouter()
   const params = useParams()
   const id = params.id as string
+
+  const { userProfile } = useAuth()
 
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -99,16 +105,32 @@ export default function EditPage() {
 
   const uploadImage = async (file: File): Promise<string | null> => {
     try {
-      const fileExt = file.name.split('.').pop()
+      // 画像を圧縮
+      console.log('元のファイルサイズ:', (file.size / 1024 / 1024).toFixed(2), 'MB')
+      
+      const options = {
+        maxSizeMB: 0.1, // 最大100KB
+        maxWidthOrHeight: 1200, // 最大幅/高さ
+        useWebWorker: true,
+        fileType: 'image/jpeg', // JPEGに変換
+      }
+      
+      const compressedFile = await imageCompression(file, options)
+      console.log('圧縮後のファイルサイズ:', (compressedFile.size / 1024).toFixed(2), 'KB')
+
+      // ファイル名をユニークにする
+      const fileExt = 'jpg' // 常にJPEG
       const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`
       const filePath = `${fileName}`
 
+      // Supabase Storageにアップロード
       const { error: uploadError } = await supabase.storage
         .from('receipts')
-        .upload(filePath, file)
+        .upload(filePath, compressedFile)
 
       if (uploadError) throw uploadError
 
+      // 公開URLを取得
       const { data } = supabase.storage
         .from('receipts')
         .getPublicUrl(filePath)
@@ -146,24 +168,12 @@ export default function EditPage() {
       }
 
       // ユーザーを取得または作成
-      const { data: existingUser } = await supabase
-        .from('users')
-        .select('id')
-        .eq('name', userName)
-        .single()
-
-      let userId = existingUser?.id
-
-      if (!userId) {
-        const { data: newUser, error: userError } = await supabase
-          .from('users')
-          .insert({ name: userName, email: `${userName}@temp.com` })
-          .select('id')
-          .single()
-
-        if (userError) throw userError
-        userId = newUser.id
+      if (!userProfile) {
+        alert('ユーザー情報が取得できませんでした')
+        return
       }
+
+      const userId = userProfile.id
 
       // 変更前のデータを保存
       const oldData = { ...transaction }
@@ -276,18 +286,16 @@ export default function EditPage() {
   }
 
   return (
+    <ProtectedRoute>
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
-      <header className="bg-gradient-to-r from-indigo-500 to-indigo-600 text-white p-4 shadow-lg">
-        <div className="container mx-auto max-w-4xl flex items-center">
-          <button onClick={() => router.push('/ledger')} className="mr-4 text-2xl hover:bg-white/20 rounded-lg p-2 transition">
-            ←
-          </button>
-          <div>
-            <h1 className="text-2xl font-bold">取引を編集</h1>
-            <p className="text-indigo-100 text-sm">変更内容は履歴に記録されます</p>
-          </div>
-        </div>
-      </header>
+      <Header
+        title="取引を編集"
+        subtitle="変更内容は履歴に記録されます"
+        showBack={true}
+        backPath="/ledger"
+        colorFrom="indigo-500"
+        colorTo="indigo-600"
+      />
 
       <main className="container mx-auto p-4 max-w-4xl">
         <form onSubmit={handleSubmit} className="bg-white rounded-lg shadow-md p-6">
@@ -471,5 +479,6 @@ export default function EditPage() {
         </form>
       </main>
     </div>
+    </ProtectedRoute>
   )
 }

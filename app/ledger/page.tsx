@@ -3,7 +3,11 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { useFiscalYear } from '../contexts/FiscalYearContext'
+import Header from '../components/Header'
 import Image from 'next/image'
+import ProtectedRoute from '../components/ProtectedRoute'
+import { useAuth } from '../contexts/AuthContext'
 
 type Account = {
   id: number
@@ -15,6 +19,7 @@ type Transaction = {
   type: string
   amount: number
   description: string
+  category: string | null
   recorded_at: string
   account_id: number | null
   from_account_id: number | null
@@ -25,22 +30,38 @@ type Transaction = {
   }
 }
 
+type CategorySummary = {
+  category: string
+  total: number
+  count: number
+}
+
+type LedgerTab = 'journal' | 'category' | 'statement'
+
 export default function LedgerPage() {
   const router = useRouter()
+  const { currentFiscalYear } = useFiscalYear()
+  const { userProfile } = useAuth()
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
   const [loading, setLoading] = useState(true)
+  const [activeTab, setActiveTab] = useState<LedgerTab>('journal')
+  
+  // 出納帳フィルター
   const [filterType, setFilterType] = useState<string>('all')
   const [filterAccount, setFilterAccount] = useState<string>('all')
   const [filterMonth, setFilterMonth] = useState<string>('all')
 
   useEffect(() => {
-    fetchData()
-  }, [])
+    if (currentFiscalYear) {
+      fetchData()
+    }
+  }, [currentFiscalYear])
 
   const fetchData = async () => {
+    if (!currentFiscalYear) return
+
     try {
-      // 口座データを取得
       const { data: accountsData } = await supabase
         .from('accounts')
         .select('*')
@@ -48,7 +69,6 @@ export default function LedgerPage() {
 
       setAccounts(accountsData || [])
 
-      // 取引データを取得（削除されていないもの）
       const { data: transactionsData, error } = await supabase
         .from('transactions')
         .select(`
@@ -56,6 +76,7 @@ export default function LedgerPage() {
           users (name)
         `)
         .eq('is_deleted', false)
+        .eq('fiscal_year_id', currentFiscalYear.id)
         .order('recorded_at', { ascending: false })
 
       if (error) throw error
@@ -67,21 +88,15 @@ export default function LedgerPage() {
     }
   }
 
-  const handleDelete = async (transactionId: string, userName: string) => {
+  const handleDelete = async (transactionId: string) => {
+    if (!userProfile) {
+      alert('ユーザー情報が取得できませんでした')
+      return
+    }
+
     if (!confirm('本当に削除しますか？\n（履歴には残ります）')) return
 
     try {
-      const { data: user } = await supabase
-        .from('users')
-        .select('id')
-        .eq('name', userName)
-        .single()
-
-      if (!user) {
-        alert('ユーザーが見つかりません')
-        return
-      }
-
       const { data: transaction } = await supabase
         .from('transactions')
         .select('*')
@@ -104,7 +119,7 @@ export default function LedgerPage() {
       await supabase.from('transaction_history').insert({
         transaction_id: transactionId,
         action: 'deleted',
-        changed_by: user.id,
+        changed_by: userProfile.id,  // ← 修正
         old_data: transaction,
       })
 
@@ -160,7 +175,6 @@ export default function LedgerPage() {
     return account?.name || '不明'
   }
 
-  // 月のリストを生成（過去12ヶ月）
   const getMonthOptions = () => {
     const options = [{ value: 'all', label: '全期間' }]
     const now = new Date()
@@ -178,26 +192,21 @@ export default function LedgerPage() {
     return options
   }
 
-  // フィルター適用
+  // 出納帳用フィルター
   const filteredTransactions = transactions.filter(t => {
-    // 種類フィルター
     if (filterType !== 'all' && t.type !== filterType) return false
     
-    // 口座フィルター
     if (filterAccount !== 'all') {
       const accountIdNum = parseInt(filterAccount)
       if (t.type === 'transfer') {
-        // 移動の場合は、移動元または移動先が一致
         if (t.from_account_id !== accountIdNum && t.to_account_id !== accountIdNum) {
           return false
         }
       } else {
-        // 収入・支出の場合
         if (t.account_id !== accountIdNum) return false
       }
     }
     
-    // 月フィルター
     if (filterMonth !== 'all') {
       const transactionDate = new Date(t.recorded_at)
       const year = transactionDate.getFullYear()
@@ -210,8 +219,8 @@ export default function LedgerPage() {
     return true
   })
 
-  // 合計金額を計算
-  const totals = filteredTransactions.reduce(
+  // 出納帳用合計
+  const journalTotals = filteredTransactions.reduce(
     (acc, t) => {
       if (t.type === 'income') {
         acc.income += Number(t.amount)
@@ -223,6 +232,70 @@ export default function LedgerPage() {
     { income: 0, expense: 0 }
   )
 
+  // 科目別台帳用データ
+  const getCategorySummary = (): { income: CategorySummary[], expense: CategorySummary[] } => {
+    const income: { [key: string]: { total: number, count: number } } = {}
+    const expense: { [key: string]: { total: number, count: number } } = {}
+
+    transactions.forEach(t => {
+      if (!t.category) return
+      
+      if (t.type === 'income') {
+        if (!income[t.category]) {
+          income[t.category] = { total: 0, count: 0 }
+        }
+        income[t.category].total += Number(t.amount)
+        income[t.category].count += 1
+      } else if (t.type === 'expense') {
+        if (!expense[t.category]) {
+          expense[t.category] = { total: 0, count: 0 }
+        }
+        expense[t.category].total += Number(t.amount)
+        expense[t.category].count += 1
+      }
+    })
+
+    return {
+      income: Object.entries(income).map(([category, data]) => ({
+        category,
+        total: data.total,
+        count: data.count,
+      })),
+      expense: Object.entries(expense).map(([category, data]) => ({
+        category,
+        total: data.total,
+        count: data.count,
+      })),
+    }
+  }
+
+  // 収支計算書用データ
+  const getStatementData = () => {
+    const income: { [key: string]: number } = {}
+    const expense: { [key: string]: number } = {}
+
+    transactions.forEach(t => {
+      if (!t.category) return
+      
+      if (t.type === 'income') {
+        income[t.category] = (income[t.category] || 0) + Number(t.amount)
+      } else if (t.type === 'expense') {
+        expense[t.category] = (expense[t.category] || 0) + Number(t.amount)
+      }
+    })
+
+    const totalIncome = Object.values(income).reduce((sum, val) => sum + val, 0)
+    const totalExpense = Object.values(expense).reduce((sum, val) => sum + val, 0)
+
+    return {
+      income,
+      expense,
+      totalIncome,
+      totalExpense,
+      balance: totalIncome - totalExpense,
+    }
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center">
@@ -231,211 +304,479 @@ export default function LedgerPage() {
     )
   }
 
+  const categorySummary = getCategorySummary()
+  const statementData = getStatementData()
+
   return (
+    <ProtectedRoute>
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
-      <header className="bg-gradient-to-r from-violet-500 to-purple-500 text-white p-4 shadow-lg">
-        <div className="container mx-auto max-w-4xl flex items-center">
-          <button onClick={() => router.push('/')} className="mr-4 text-2xl hover:bg-white/20 rounded-lg p-2 transition">
-            ←
-          </button>
-          <div>
-            <h1 className="text-2xl font-bold">帳簿</h1>
-            <p className="text-violet-100 text-sm">全取引を確認・編集</p>
-          </div>
-        </div>
-      </header>
+      <Header
+        title="帳簿"
+        subtitle="全取引を確認・編集"
+        showBack={true}
+        colorFrom="violet-500"
+        colorTo="purple-500"
+      />
 
       <main className="container mx-auto p-4 max-w-4xl">
-        {/* フィルター */}
-        <div className="bg-white rounded-lg shadow-md p-4 mb-6">
-          <h3 className="font-bold mb-3">絞り込み</h3>
-          
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {/* 種類フィルター */}
-            <div>
-              <label className="block text-sm text-gray-700 font-semibold mb-1">
-                種類
-              </label>
-              <select
-                value={filterType}
-                onChange={(e) => setFilterType(e.target.value)}
-                className="w-full p-2 border border-gray-300 rounded"
-              >
-                <option value="all">全て</option>
-                <option value="income">収入</option>
-                <option value="expense">支出</option>
-                <option value="transfer">移動</option>
-              </select>
-            </div>
-
-            {/* 口座フィルター */}
-            <div>
-              <label className="block text-sm text-gray-700 font-semibold mb-1">
-                口座
-              </label>
-              <select
-                value={filterAccount}
-                onChange={(e) => setFilterAccount(e.target.value)}
-                className="w-full p-2 border border-gray-300 rounded"
-              >
-                <option value="all">全て</option>
-                <option value="1">現金</option>
-                <option value="2">ゆうちょ銀行</option>
-              </select>
-            </div>
-
-            {/* 月フィルター */}
-            <div>
-              <label className="block text-sm text-gray-700 font-semibold mb-1">
-                期間
-              </label>
-              <select
-                value={filterMonth}
-                onChange={(e) => setFilterMonth(e.target.value)}
-                className="w-full p-2 border border-gray-300 rounded"
-              >
-                {getMonthOptions().map(option => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* フィルターリセット */}
-          {(filterType !== 'all' || filterAccount !== 'all' || filterMonth !== 'all') && (
+        {/* タブ */}
+        <div className="bg-white rounded-t-xl shadow-md border-b border-gray-200">
+          <div className="flex">
             <button
-              onClick={() => {
-                setFilterType('all')
-                setFilterAccount('all')
-                setFilterMonth('all')
-              }}
-              className="mt-3 text-sm text-blue-600 hover:text-blue-800"
+              onClick={() => setActiveTab('journal')}
+              className={`flex-1 py-4 px-6 font-bold transition ${
+                activeTab === 'journal'
+                  ? 'bg-white text-violet-600 border-b-2 border-violet-600'
+                  : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+              }`}
             >
-              ✕ フィルターをリセット
+              📝 出納帳
             </button>
-          )}
-        </div>
-
-        {/* 合計金額表示 */}
-        <div className="bg-white rounded-lg shadow-md p-4 mb-6">
-          <div className="grid grid-cols-3 gap-4">
-            <div className="text-center">
-              <p className="text-sm text-gray-600">収入合計</p>
-              <p className="text-xl font-bold text-green-600">
-                +{formatCurrency(totals.income)}
-              </p>
-            </div>
-            <div className="text-center">
-              <p className="text-sm text-gray-600">支出合計</p>
-              <p className="text-xl font-bold text-red-600">
-                -{formatCurrency(totals.expense)}
-              </p>
-            </div>
-            <div className="text-center">
-              <p className="text-sm text-gray-600">収支</p>
-              <p className={`text-xl font-bold ${
-                totals.income - totals.expense >= 0 ? 'text-blue-600' : 'text-red-600'
-              }`}>
-                {totals.income - totals.expense >= 0 ? '+' : ''}
-                {formatCurrency(totals.income - totals.expense)}
-              </p>
-            </div>
+            <button
+              onClick={() => setActiveTab('category')}
+              className={`flex-1 py-4 px-6 font-bold transition ${
+                activeTab === 'category'
+                  ? 'bg-white text-violet-600 border-b-2 border-violet-600'
+                  : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              🏷️ 科目別台帳
+            </button>
+            <button
+              onClick={() => setActiveTab('statement')}
+              className={`flex-1 py-4 px-6 font-bold transition ${
+                activeTab === 'statement'
+                  ? 'bg-white text-violet-600 border-b-2 border-violet-600'
+                  : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              📊 収支計算書
+            </button>
           </div>
         </div>
 
-        {/* 取引一覧 */}
-        <div className="bg-white rounded-lg shadow-md p-6">
-          <h2 className="text-xl font-bold mb-4">
-            取引一覧（{filteredTransactions.length}件）
-          </h2>
+        {/* コンテンツ */}
+        <div className="bg-white rounded-b-xl shadow-md p-6">
+          {/* 出納帳 */}
+          {activeTab === 'journal' && (
+            <JournalView
+              transactions={filteredTransactions}
+              accounts={accounts}
+              filterType={filterType}
+              setFilterType={setFilterType}
+              filterAccount={filterAccount}
+              setFilterAccount={setFilterAccount}
+              filterMonth={filterMonth}
+              setFilterMonth={setFilterMonth}
+              monthOptions={getMonthOptions()}
+              totals={journalTotals}
+              onEdit={(id: any) => router.push(`/edit/${id}`)}
+              onDelete={handleDelete}
+              formatCurrency={formatCurrency}
+              formatDateTime={formatDateTime}
+              getTypeLabel={getTypeLabel}
+              getAccountName={getAccountName}
+            />
+          )}
 
-          {filteredTransactions.length === 0 ? (
-            <p className="text-gray-500 text-center py-4">取引がありません</p>
-          ) : (
-            <div className="space-y-4">
-              {filteredTransactions.map((transaction) => (
-                <div
-                  key={transaction.id}
-                  className="border rounded-lg p-4 hover:bg-gray-50"
-                >
-                  <div className="flex justify-between items-start mb-2">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="bg-blue-100 text-blue-800 text-xs font-semibold px-2 py-1 rounded">
-                          {getTypeLabel(transaction.type)}
-                        </span>
-                        <span className="text-sm text-gray-500">
-                          {formatDateTime(transaction.recorded_at)}
-                        </span>
-                      </div>
-                      <p className="font-bold text-lg">{transaction.description}</p>
-                      
-                      {transaction.type === 'transfer' ? (
-                        <p className="text-sm text-gray-600">
-                          {getAccountName(transaction.from_account_id)} → {getAccountName(transaction.to_account_id)}
-                        </p>
-                      ) : (
-                        <p className="text-sm text-gray-600">
-                          口座: {getAccountName(transaction.account_id)}
-                        </p>
-                      )}
-                      
-                      <p className="text-sm text-gray-500">
-                        記入者: {transaction.users.name}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className={`text-2xl font-bold ${
-                        transaction.type === 'income' ? 'text-green-600' :
-                        transaction.type === 'expense' ? 'text-red-600' :
-                        'text-blue-600'
-                      }`}>
-                        {transaction.type === 'income' ? '+' : transaction.type === 'expense' ? '-' : '±'}
-                        {formatCurrency(transaction.amount)}
-                      </p>
-                    </div>
-                  </div>
+          {/* 科目別台帳 */}
+          {activeTab === 'category' && (
+            <CategoryLedgerView
+              categorySummary={categorySummary}
+              formatCurrency={formatCurrency}
+            />
+          )}
 
-                  {/* 領収書画像表示 */}
-                  {transaction.receipt_image_url && (
-                    <div className="mt-3 mb-3">
-                      <p className="text-sm text-gray-600 mb-2">📎 領収書:</p>
-                      <Image
-                        src={transaction.receipt_image_url}
-                        alt="領収書"
-                        width={300}
-                        height={200}
-                        className="rounded border cursor-pointer hover:opacity-80"
-                        onClick={() => window.open(transaction.receipt_image_url!, '_blank')}
-                      />
-                    </div>
-                  )}
-
-                  <div className="flex gap-2 mt-3">
-                    <button
-                      onClick={() => router.push(`/edit/${transaction.id}`)}
-                      className="flex-1 bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded"
-                    >
-                      編集
-                    </button>
-                    <button
-                      onClick={() => {
-                        const userName = prompt('あなたの名前を入力してください:')
-                        if (userName) handleDelete(transaction.id, userName)
-                      }}
-                      className="flex-1 bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded"
-                    >
-                      削除
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
+          {/* 収支計算書 */}
+          {activeTab === 'statement' && (
+            <StatementView
+              statementData={statementData}
+              fiscalYear={currentFiscalYear}
+              formatCurrency={formatCurrency}
+            />
           )}
         </div>
       </main>
+    </div>
+    </ProtectedRoute>
+  )
+}
+
+// 出納帳ビュー
+function JournalView({
+  transactions,
+  accounts,
+  filterType,
+  setFilterType,
+  filterAccount,
+  setFilterAccount,
+  filterMonth,
+  setFilterMonth,
+  monthOptions,
+  totals,
+  onEdit,
+  onDelete,
+  formatCurrency,
+  formatDateTime,
+  getTypeLabel,
+  getAccountName,
+}: any) {
+  return (
+    <>
+      {/* フィルター */}
+      <div className="mb-6">
+        <h3 className="font-bold mb-3">絞り込み</h3>
+        
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label className="block text-sm text-gray-700 font-semibold mb-1">種類</label>
+            <select
+              value={filterType}
+              onChange={(e) => setFilterType(e.target.value)}
+              className="w-full p-2 border border-gray-300 rounded"
+            >
+              <option value="all">全て</option>
+              <option value="income">収入</option>
+              <option value="expense">支出</option>
+              <option value="transfer">移動</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm text-gray-700 font-semibold mb-1">口座</label>
+            <select
+              value={filterAccount}
+              onChange={(e) => setFilterAccount(e.target.value)}
+              className="w-full p-2 border border-gray-300 rounded"
+            >
+              <option value="all">全て</option>
+              <option value="1">現金</option>
+              <option value="2">ゆうちょ銀行</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm text-gray-700 font-semibold mb-1">期間</label>
+            <select
+              value={filterMonth}
+              onChange={(e) => setFilterMonth(e.target.value)}
+              className="w-full p-2 border border-gray-300 rounded"
+            >
+              {monthOptions.map((option: any) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {(filterType !== 'all' || filterAccount !== 'all' || filterMonth !== 'all') && (
+          <button
+            onClick={() => {
+              setFilterType('all')
+              setFilterAccount('all')
+              setFilterMonth('all')
+            }}
+            className="mt-3 text-sm text-violet-600 hover:text-violet-800"
+          >
+            ✕ フィルターをリセット
+          </button>
+        )}
+      </div>
+
+      {/* 合計金額表示 */}
+      <div className="mb-6 p-4 bg-gray-50 rounded-lg">
+        <div className="grid grid-cols-3 gap-4">
+          <div className="text-center">
+            <p className="text-sm text-gray-600">収入合計</p>
+            <p className="text-xl font-bold text-green-600">
+              +{formatCurrency(totals.income)}
+            </p>
+          </div>
+          <div className="text-center">
+            <p className="text-sm text-gray-600">支出合計</p>
+            <p className="text-xl font-bold text-red-600">
+              -{formatCurrency(totals.expense)}
+            </p>
+          </div>
+          <div className="text-center">
+            <p className="text-sm text-gray-600">収支</p>
+            <p className={`text-xl font-bold ${
+              totals.income - totals.expense >= 0 ? 'text-blue-600' : 'text-red-600'
+            }`}>
+              {totals.income - totals.expense >= 0 ? '+' : ''}
+              {formatCurrency(totals.income - totals.expense)}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* 取引一覧 */}
+      <div>
+        <h2 className="text-xl font-bold mb-4">
+          取引一覧（{transactions.length}件）
+        </h2>
+
+        {transactions.length === 0 ? (
+          <p className="text-gray-500 text-center py-4">取引がありません</p>
+        ) : (
+          <div className="space-y-4">
+            {transactions.map((transaction: any) => (
+              <div
+                key={transaction.id}
+                className="border rounded-lg p-4 hover:bg-gray-50 relative group"
+              >
+                {/* 編集・削除ボタン（控えめに） */}
+                <div className="absolute top-3 right-3 flex gap-1 opacity-0 group-hover:opacity-100 transition">
+                  <button
+                    onClick={() => onEdit(transaction.id)}
+                    className="p-1 text-gray-400 hover:text-blue-600 transition"
+                    title="編集"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={() => {
+                      const userName = prompt('あなたの名前を入力してください:')
+                      if (userName) onDelete(transaction.id, userName)
+                    }}
+                    className="p-1 text-gray-400 hover:text-red-600 transition"
+                    title="削除"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  </button>
+                </div>
+
+                <div className="flex justify-between items-start mb-2 pr-16">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="bg-blue-100 text-blue-800 text-xs font-semibold px-2 py-1 rounded">
+                        {getTypeLabel(transaction.type)}
+                      </span>
+                      <span className="text-sm text-gray-500">
+                        {formatDateTime(transaction.recorded_at)}
+                      </span>
+                    </div>
+                    <p className="font-bold text-lg">{transaction.description}</p>
+                    
+                    {transaction.category && (
+                      <p className="text-sm text-gray-600">
+                        カテゴリー: {transaction.category}
+                      </p>
+                    )}
+                    
+                    {transaction.type === 'transfer' ? (
+                      <p className="text-sm text-gray-600">
+                        {getAccountName(transaction.from_account_id)} → {getAccountName(transaction.to_account_id)}
+                      </p>
+                    ) : (
+                      <p className="text-sm text-gray-600">
+                        口座: {getAccountName(transaction.account_id)}
+                      </p>
+                    )}
+                    
+                    <p className="text-sm text-gray-500">
+                      記入者: {transaction.users.name}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className={`text-2xl font-bold ${
+                      transaction.type === 'income' ? 'text-green-600' :
+                      transaction.type === 'expense' ? 'text-red-600' :
+                      'text-blue-600'
+                    }`}>
+                      {transaction.type === 'income' ? '+' : transaction.type === 'expense' ? '-' : '±'}
+                      {formatCurrency(transaction.amount)}
+                    </p>
+                  </div>
+                </div>
+
+                {transaction.receipt_image_url && (
+                  <div className="mt-3 mb-3">
+                    <p className="text-sm text-gray-600 mb-2">📎 領収書:</p>
+                    <Image
+                      src={transaction.receipt_image_url}
+                      alt="領収書"
+                      width={300}
+                      height={200}
+                      className="rounded border cursor-pointer hover:opacity-80"
+                      onClick={() => window.open(transaction.receipt_image_url!, '_blank')}
+                    />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </>
+  )
+}
+
+// 科目別台帳ビュー
+function CategoryLedgerView({
+  categorySummary,
+  formatCurrency,
+}: any) {
+  return (
+    <div className="space-y-6">
+      {/* 収入 */}
+      <div>
+        <h2 className="text-xl font-bold mb-4 text-emerald-700">収入</h2>
+        {categorySummary.income.length === 0 ? (
+          <p className="text-gray-500 text-center py-4">収入がありません</p>
+        ) : (
+          <div className="space-y-3">
+            {categorySummary.income.map((item: CategorySummary) => (
+              <div key={item.category} className="flex justify-between items-center p-4 bg-emerald-50 rounded-lg border border-emerald-200">
+                <div>
+                  <p className="font-bold text-gray-800">{item.category}</p>
+                  <p className="text-sm text-gray-600">{item.count}件</p>
+                </div>
+                <p className="text-2xl font-bold text-emerald-600">
+                  +{formatCurrency(item.total)}
+                </p>
+              </div>
+            ))}
+            <div className="flex justify-between items-center p-4 bg-emerald-100 rounded-lg border border-emerald-300">
+              <p className="font-bold text-gray-800">収入合計</p>
+              <p className="text-2xl font-bold text-emerald-700">
+                +{formatCurrency(categorySummary.income.reduce((sum: number, item: CategorySummary) => sum + item.total, 0))}
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* 支出 */}
+      <div>
+        <h2 className="text-xl font-bold mb-4 text-rose-700">支出</h2>
+        {categorySummary.expense.length === 0 ? (
+          <p className="text-gray-500 text-center py-4">支出がありません</p>
+        ) : (
+          <div className="space-y-3">
+            {categorySummary.expense.map((item: CategorySummary) => (
+              <div key={item.category} className="flex justify-between items-center p-4 bg-rose-50 rounded-lg border border-rose-200">
+                <div>
+                  <p className="font-bold text-gray-800">{item.category}</p>
+                  <p className="text-sm text-gray-600">{item.count}件</p>
+                </div>
+                <p className="text-2xl font-bold text-rose-600">
+                  -{formatCurrency(item.total)}
+                </p>
+              </div>
+            ))}
+            <div className="flex justify-between items-center p-4 bg-rose-100 rounded-lg border border-rose-300">
+              <p className="font-bold text-gray-800">支出合計</p>
+              <p className="text-2xl font-bold text-rose-700">
+                -{formatCurrency(categorySummary.expense.reduce((sum: number, item: CategorySummary) => sum + item.total, 0))}
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// 収支計算書ビュー
+function StatementView({
+  statementData,
+  fiscalYear,
+  formatCurrency,
+}: any) {
+  return (
+    <div className="space-y-6">
+      <div className="text-center mb-6">
+        <h2 className="text-2xl font-bold text-gray-800">収支計算書</h2>
+        <p className="text-gray-600 mt-1">{fiscalYear?.name}</p>
+      </div>
+
+      {/* 収入の部 */}
+      <div className="border-2 border-gray-200 rounded-lg p-6">
+        <h3 className="text-lg font-bold mb-4 text-emerald-700 border-b-2 border-emerald-200 pb-2">
+          【収入の部】
+        </h3>
+        <div className="space-y-2">
+          {Object.entries(statementData.income).map(([category, amount]: any) => (
+            <div key={category} className="flex justify-between py-2">
+              <span className="text-gray-700">{category}</span>
+              <span className="font-semibold">{formatCurrency(amount)}</span>
+            </div>
+          ))}
+          <div className="border-t-2 border-gray-300 pt-3 mt-3">
+            <div className="flex justify-between font-bold text-lg">
+              <span>収入合計</span>
+              <span className="text-emerald-600">{formatCurrency(statementData.totalIncome)}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 支出の部 */}
+      <div className="border-2 border-gray-200 rounded-lg p-6">
+        <h3 className="text-lg font-bold mb-4 text-rose-700 border-b-2 border-rose-200 pb-2">
+          【支出の部】
+        </h3>
+        <div className="space-y-2">
+          {Object.entries(statementData.expense).map(([category, amount]: any) => (
+            <div key={category} className="flex justify-between py-2">
+              <span className="text-gray-700">{category}</span>
+              <span className="font-semibold">{formatCurrency(amount)}</span>
+            </div>
+          ))}
+          <div className="border-t-2 border-gray-300 pt-3 mt-3">
+            <div className="flex justify-between font-bold text-lg">
+              <span>支出合計</span>
+              <span className="text-rose-600">{formatCurrency(statementData.totalExpense)}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 収支 */}
+      <div className="border-2 border-indigo-200 rounded-lg p-6 bg-indigo-50">
+        <h3 className="text-lg font-bold mb-4 text-indigo-700 border-b-2 border-indigo-300 pb-2">
+          【収支】
+        </h3>
+        <div className="space-y-3">
+          <div className="flex justify-between py-2">
+            <span className="text-gray-700">当期収支</span>
+            <span className={`font-bold text-xl ${
+              statementData.balance >= 0 ? 'text-indigo-600' : 'text-rose-600'
+            }`}>
+              {statementData.balance >= 0 ? '+' : ''}
+              {formatCurrency(statementData.balance)}
+            </span>
+          </div>
+          <div className="flex justify-between py-2">
+            <span className="text-gray-700">期首残高</span>
+            <span className="font-semibold">
+              {formatCurrency(
+                Number(fiscalYear?.starting_balance_cash || 0) + 
+                Number(fiscalYear?.starting_balance_bank || 0)
+              )}
+            </span>
+          </div>
+          <div className="border-t-2 border-indigo-300 pt-3">
+            <div className="flex justify-between font-bold text-xl">
+              <span>期末残高</span>
+              <span className="text-indigo-700">
+                {formatCurrency(
+                  statementData.balance +
+                  Number(fiscalYear?.starting_balance_cash || 0) +
+                  Number(fiscalYear?.starting_balance_bank || 0)
+                )}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
