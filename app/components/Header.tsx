@@ -1,8 +1,9 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { useFiscalYear } from '@/app/contexts/FiscalYearContext'
+import { useAuth } from '@/app/contexts/AuthContext'
 import { supabase } from '@/lib/supabase'
 import AddFiscalYearModal from './AddFiscalYearModal'
 
@@ -25,11 +26,28 @@ export default function Header({
 }: HeaderProps) {
   const router = useRouter()
   const { currentFiscalYear, allFiscalYears, setCurrentFiscalYear, refreshFiscalYears, loading } = useFiscalYear()
+  const { userProfile, signOut } = useAuth()
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [currentBalance, setCurrentBalance] = useState({ cash: 0, bank: 0 })
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     fetchCurrentBalance()
+  }, [])
+
+  // メニュー外クリックで閉じる
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setIsUserMenuOpen(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
   }, [])
 
   const fetchCurrentBalance = async () => {
@@ -51,7 +69,6 @@ export default function Header({
 
     if (value === 'add_new') {
       setIsModalOpen(true)
-      // ドロップダウンを元に戻す
       e.target.value = currentFiscalYear?.id.toString() || ''
       return
     }
@@ -67,9 +84,30 @@ export default function Header({
     await refreshFiscalYears()
   }
 
+  const handleMenuItemClick = (action: () => void) => {
+    setIsUserMenuOpen(false)
+    action()
+  }
+
+  // 色のマッピング（Tailwindの動的クラス問題を回避）
+  const getGradientClass = (from: string, to: string) => {
+    const gradients: { [key: string]: string } = {
+      'indigo-500_purple-500': 'bg-gradient-to-r from-indigo-500 to-purple-500',
+      'emerald-500_teal-500': 'bg-gradient-to-r from-emerald-500 to-teal-500',
+      'violet-500_purple-500': 'bg-gradient-to-r from-violet-500 to-purple-500',
+      'amber-500_orange-500': 'bg-gradient-to-r from-amber-500 to-orange-500',
+      'indigo-500_indigo-600': 'bg-gradient-to-r from-indigo-500 to-indigo-600',
+      'gray-700_gray-800': 'bg-gradient-to-r from-gray-700 to-gray-800',
+      'slate-700_slate-800': 'bg-gradient-to-r from-slate-700 to-slate-800',
+    }
+    
+    const key = `${from}_${to}`
+    return gradients[key] || 'bg-gradient-to-r from-indigo-500 to-purple-500'
+  }
+
   return (
     <>
-      <header className={`bg-gradient-to-r from-${colorFrom} to-${colorTo} text-white shadow-lg`}>
+      <header className={`${getGradientClass(colorFrom, colorTo)} text-white shadow-lg`}>
         <div className="container mx-auto max-w-4xl">
           {/* 年度選択バー */}
           <div className="flex justify-between items-center px-4 py-2 border-b border-white/20">
@@ -94,12 +132,69 @@ export default function Header({
                 </select>
               )}
             </div>
-            <button
-              onClick={() => router.push('/settings')}
-              className="text-sm bg-white/20 hover:bg-white/30 px-3 py-1 rounded transition"
-            >
-              ⚙️ 設定
-            </button>
+            
+            {/* ユーザーメニュー */}
+            {userProfile && (
+              <div className="relative" ref={menuRef}>
+                <button
+                  onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+                  className="flex items-center gap-2 bg-white/20 hover:bg-white/30 px-3 py-1 rounded transition"
+                >
+                  <span className="text-sm font-semibold hidden sm:inline">
+                    {userProfile.name}
+                  </span>
+                  <span className="text-sm font-semibold sm:hidden">
+                    {userProfile.name.charAt(0)}
+                  </span>
+                  <svg
+                    className={`w-4 h-4 transition-transform ${isUserMenuOpen ? 'rotate-180' : ''}`}
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+
+                {/* ドロップダウンメニュー */}
+                {isUserMenuOpen && (
+                  <div className="absolute right-0 mt-2 w-56 bg-white rounded-lg shadow-xl py-2 z-50 border border-gray-200">
+                    {/* ユーザー情報 */}
+                    <div className="px-4 py-3 border-b border-gray-200">
+                      <p className="text-sm font-semibold text-gray-900">{userProfile.name}</p>
+                      <p className="text-xs text-gray-500 mt-1">{userProfile.email}</p>
+                    </div>
+
+                    {/* メニュー項目 */}
+                    <button
+                      onClick={() => handleMenuItemClick(() => router.push('/settings'))}
+                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-3 transition"
+                    >
+                      <span className="text-lg">⚙️</span>
+                      <span>設定</span>
+                    </button>
+
+                    <button
+                      onClick={() => handleMenuItemClick(() => router.push('/members'))}
+                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-3 transition"
+                    >
+                      <span className="text-lg">👥</span>
+                      <span>メンバー管理</span>
+                    </button>
+
+                    <div className="border-t border-gray-200 my-1"></div>
+
+                    <button
+                      onClick={() => handleMenuItemClick(signOut)}
+                      className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-3 transition"
+                    >
+                      <span className="text-lg">🚪</span>
+                      <span>ログアウト</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* タイトルバー */}

@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { useFiscalYear } from './contexts/FiscalYearContext'
 import Header from './components/Header'
+import ProtectedRoute from './components/ProtectedRoute'
 
 type Account = {
   id: number
@@ -147,6 +148,7 @@ export default function Home() {
   }
 
   return (
+    <ProtectedRoute>
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
       {/* ヘッダー */}
       <Header
@@ -276,5 +278,6 @@ export default function Home() {
         </div>
       </main>
     </div>
+    </ProtectedRoute>
   )
 }

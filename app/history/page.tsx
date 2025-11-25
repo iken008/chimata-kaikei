@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useFiscalYear } from '../contexts/FiscalYearContext'
 import Header from '../components/Header'
+import ProtectedRoute from '../components/ProtectedRoute'
+import { useAuth } from '../contexts/AuthContext'
 
 type Account = {
   id: number
@@ -27,6 +29,7 @@ type HistoryRecord = {
 export default function HistoryPage() {
   const router = useRouter()
   const { currentFiscalYear } = useFiscalYear()
+  const { userProfile } = useAuth()
   const [history, setHistory] = useState<HistoryRecord[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
   const [loading, setLoading] = useState(true)
@@ -103,38 +106,17 @@ export default function HistoryPage() {
   }
 
   const handleRestore = async (transaction: any) => {
-    const userName = prompt('あなたの名前を入力してください（復元操作の記録用）:')
-    if (!userName) return
+    if (!userProfile) {
+      alert('ユーザー情報が取得できませんでした')
+      return
+    }
 
     if (!confirm(`「${transaction.description}」を復元しますか？\n\n残高も元に戻ります。`)) {
       return
     }
 
     try {
-      // ユーザーを取得または作成
-      let userId: string
-
-      const { data: existingUser } = await supabase
-        .from('users')
-        .select('id')
-        .eq('name', userName)
-        .single()
-
-      if (existingUser) {
-        userId = existingUser.id
-      } else {
-        // 新規ユーザーを作成
-        const { data: newUser, error: userError } = await supabase
-          .from('users')
-          .insert({ name: userName })
-          .select('id')
-          .single()
-
-        if (userError) throw userError
-        if (!newUser) throw new Error('ユーザーの作成に失敗しました')
-        
-        userId = newUser.id
-      }
+      const userId = userProfile.id
 
       // 取引を復元（is_deleted = false に戻す）
       const { error: updateError } = await supabase
@@ -251,6 +233,7 @@ export default function HistoryPage() {
   }
 
   return (
+    <ProtectedRoute>
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
       <Header
         title="操作履歴"
@@ -380,5 +363,6 @@ export default function HistoryPage() {
         </div>
       </main>
     </div>
+    </ProtectedRoute>
   )
 }

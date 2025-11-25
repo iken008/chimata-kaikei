@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase'
 import { useFiscalYear } from '../contexts/FiscalYearContext'
 import Header from '../components/Header'
 import JSZip from 'jszip'
+import ProtectedRoute from '../components/ProtectedRoute'
 
 type FiscalYear = {
   id: number
@@ -48,7 +49,6 @@ export default function SettingsPage() {
     fetchCategories()
   }, [])
 
-  // タブが 'category' に切り替わった時にもカテゴリーを取得
   useEffect(() => {
     if (activeTab === 'category') {
       fetchCategories()
@@ -72,26 +72,37 @@ export default function SettingsPage() {
   const fetchStorageUsage = async () => {
     setLoadingUsage(true)
     try {
-      // トランザクション数を取得
       const { count: txCount } = await supabase
         .from('transactions')
         .select('*', { count: 'exact', head: true })
 
-      // 履歴数を取得
       const { count: historyCount } = await supabase
         .from('transaction_history')
         .select('*', { count: 'exact', head: true })
 
-      // 画像数を取得
-      const { data: images } = await supabase.storage
+      // 画像を取得
+      const { data: images, error: storageError } = await supabase.storage
         .from('receipts')
         .list()
 
-      const imageCount = images?.length || 0
+      // デバッグ：何が返されているか確認
+      console.log('Storage list result:', images)
+      console.log('Storage error:', storageError)
+      console.log('Images length:', images?.length)
+      
+      // 実際のファイルのみをカウント（フォルダや.emptyFoldersを除外）
+      const actualFiles = images?.filter(file => 
+        file.name && 
+        !file.name.startsWith('.') && 
+        file.name !== '.emptyFolderPlaceholder'
+      ) || []
 
-      // 概算サイズ計算
-      const databaseSize = ((txCount || 0) * 1 + (historyCount || 0) * 2) / 1024 // MB
-      const storageSize = (imageCount * 100) / 1024 // MB
+      console.log('Actual files:', actualFiles)
+
+      const imageCount = actualFiles.length
+
+      const databaseSize = ((txCount || 0) * 1 + (historyCount || 0) * 2) / 1024
+      const storageSize = (imageCount * 100) / 1024
 
       setStorageUsage({
         databaseSize,
@@ -105,7 +116,6 @@ export default function SettingsPage() {
     }
   }
 
-  // 年度情報の編集（名前、期間、期首残高）
   const handleUpdateFiscalYear = async (
     fiscalYearId: number,
     name: string,
@@ -137,47 +147,6 @@ export default function SettingsPage() {
     }
   }
 
-  // 年度の削除
-  const handleDeleteFiscalYear = async (fiscalYearId: number, fiscalYearName: string) => {
-    if (!confirm(`${fiscalYearName}を削除しますか？\n\nこの年度の全ての取引データも削除されます。この操作は取り消せません。`)) {
-      return
-    }
-
-    if (!confirm('本当に削除しますか？もう一度確認してください。')) {
-      return
-    }
-
-    try {
-      // トランザクションの削除
-      const { error: txError } = await supabase
-        .from('transactions')
-        .delete()
-        .eq('fiscal_year_id', fiscalYearId)
-
-      if (txError) throw txError
-
-      // 年度の削除
-      const { error: fyError } = await supabase
-        .from('fiscal_years')
-        .delete()
-        .eq('id', fiscalYearId)
-
-      if (fyError) throw fyError
-
-      alert('年度を削除しました')
-      await refreshFiscalYears()
-
-      // 削除した年度が現在選択中だった場合、ホームに戻る
-      if (currentFiscalYear?.id === fiscalYearId) {
-        router.push('/')
-      }
-    } catch (error) {
-      console.error('Error deleting fiscal year:', error)
-      alert('エラーが発生しました')
-    }
-  }
-
-  // カテゴリーの追加
   const handleAddCategory = async () => {
     if (!newCategoryName.trim()) {
       alert('カテゴリー名を入力してください')
@@ -185,7 +154,6 @@ export default function SettingsPage() {
     }
 
     try {
-      // 最大のsort_orderを取得
       const { data: maxData } = await supabase
         .from('categories')
         .select('sort_order')
@@ -214,7 +182,6 @@ export default function SettingsPage() {
     }
   }
 
-  // カテゴリー名の編集
   const handleUpdateCategory = async (categoryId: number, newName: string) => {
     if (!newName.trim()) {
       alert('カテゴリー名を入力してください')
@@ -238,7 +205,6 @@ export default function SettingsPage() {
     }
   }
 
-  // カテゴリーの削除
   const handleDeleteCategory = async (categoryId: number, categoryName: string) => {
     if (!confirm(`「${categoryName}」を削除しますか？`)) {
       return
@@ -265,216 +231,217 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
-      <Header
-        title="設定"
-        subtitle="年度・カテゴリーの管理"
-        showBack={true}
-        colorFrom="slate-700"
-        colorTo="slate-800"
-      />
+    <ProtectedRoute>
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
+        <Header
+          title="設定"
+          subtitle="年度・カテゴリーの管理"
+          showBack={true}
+          colorFrom="gray-700"
+          colorTo="gray-800"
+        />
 
-      <main className="container mx-auto p-4 max-w-4xl">
-        {/* タブ */}
-        <div className="bg-white rounded-t-xl shadow-md border-b border-gray-200">
-          <div className="flex">
-            <button
-              onClick={() => setActiveTab('fiscal')}
-              className={`flex-1 py-4 px-6 font-bold transition ${
-                activeTab === 'fiscal'
-                  ? 'bg-white text-indigo-600 border-b-2 border-indigo-600'
-                  : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
-              }`}
-            >
-              📅 年度管理
-            </button>
-            <button
-              onClick={() => setActiveTab('category')}
-              className={`flex-1 py-4 px-6 font-bold transition ${
-                activeTab === 'category'
-                  ? 'bg-white text-indigo-600 border-b-2 border-indigo-600'
-                  : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
-              }`}
-            >
-              🏷️ カテゴリー管理
-            </button>
-            <button
-              onClick={() => {
-                setActiveTab('data')
-                if (!storageUsage) fetchStorageUsage()
-              }}
-              className={`flex-1 py-4 px-6 font-bold transition ${
-                activeTab === 'data'
-                  ? 'bg-white text-indigo-600 border-b-2 border-indigo-600'
-                  : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
-              }`}
-            >
-              💾 データ管理
-            </button>
+        <main className="container mx-auto p-4 max-w-4xl">
+          {/* タブ */}
+          <div className="bg-white rounded-t-xl shadow-md border-b border-gray-200">
+            <div className="flex">
+              <button
+                onClick={() => setActiveTab('fiscal')}
+                className={`flex-1 py-4 px-6 font-bold transition ${
+                  activeTab === 'fiscal'
+                    ? 'bg-white text-indigo-600 border-b-2 border-indigo-600'
+                    : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                📅 年度管理
+              </button>
+              <button
+                onClick={() => setActiveTab('category')}
+                className={`flex-1 py-4 px-6 font-bold transition ${
+                  activeTab === 'category'
+                    ? 'bg-white text-indigo-600 border-b-2 border-indigo-600'
+                    : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                🏷️ カテゴリー管理
+              </button>
+              <button
+                onClick={() => {
+                  setActiveTab('data')
+                  if (!storageUsage) fetchStorageUsage()
+                }}
+                className={`flex-1 py-4 px-6 font-bold transition ${
+                  activeTab === 'data'
+                    ? 'bg-white text-indigo-600 border-b-2 border-indigo-600'
+                    : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                💾 データ管理
+              </button>
+            </div>
           </div>
-        </div>
 
-        {/* コンテンツ */}
-        <div className="bg-white rounded-b-xl shadow-md p-6">
-          {activeTab === 'fiscal' && (
-            <div>
-              <h2 className="text-xl font-bold mb-4 text-gray-800">年度一覧</h2>
-              <div className="space-y-4">
-                {allFiscalYears.map((fy) => (
-                  <div
-                    key={fy.id}
-                    className={`border rounded-lg p-4 ${
-                      fy.id === currentFiscalYear?.id
-                        ? 'border-indigo-500 bg-indigo-50'
-                        : 'border-gray-200'
-                    }`}
-                  >
-                    <div className="flex justify-between items-start mb-3">
-                      <div>
-                        <h3 className="text-lg font-bold text-gray-800">
-                          {fy.name}
-                          {fy.id === currentFiscalYear?.id && (
-                            <span className="ml-2 text-xs bg-indigo-500 text-white px-2 py-1 rounded">
-                              現在
-                            </span>
-                          )}
-                        </h3>
-                        <p className="text-sm text-gray-600">
-                          {fy.start_date} 〜 {fy.end_date}
-                        </p>
-                      </div>
-                      {allFiscalYears.length > 1 && (
-                        <button
-                          onClick={() => handleDeleteFiscalYear(fy.id, fy.name)}
-                          className="text-red-500 hover:text-red-700 text-sm font-bold"
+          {/* コンテンツ */}
+          <div className="bg-white rounded-b-xl shadow-md p-6">
+            {activeTab === 'fiscal' && (
+              <div className="space-y-6">
+                {/* 年度一覧 */}
+                <div>
+                  <h2 className="text-xl font-bold text-gray-800 mb-4">年度一覧</h2>
+
+                  {allFiscalYears.length === 0 ? (
+                    <p className="text-gray-500 text-center py-8">年度がありません</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {allFiscalYears.map((fy) => (
+                        <div
+                          key={fy.id}
+                          className={`p-4 rounded-lg border transition ${
+                            fy.is_current
+                              ? 'bg-indigo-50 border-indigo-300'
+                              : 'bg-gray-50 border-gray-200'
+                          }`}
                         >
-                          削除
-                        </button>
-                      )}
-                    </div>
+                          <div className="flex justify-between items-start">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-2">
+                                <h3 className="font-bold text-lg">{fy.name}</h3>
+                                {fy.is_current && (
+                                  <span className="bg-indigo-500 text-white text-xs px-2 py-1 rounded">
+                                    現在
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-sm text-gray-600 space-y-1">
+                                <p>📅 期間: {fy.start_date} 〜 {fy.end_date}</p>
+                                <p>
+                                  💰 期首残高: 現金 {formatCurrency(Number(fy.starting_balance_cash))} / 
+                                  銀行 {formatCurrency(Number(fy.starting_balance_bank))}
+                                </p>
+                              </div>
 
-                    {editingFiscalYear === fy.id ? (
-                      <EditFiscalYearForm
-                        fiscalYear={fy}
-                        onSave={handleUpdateFiscalYear}
-                        onCancel={() => setEditingFiscalYear(null)}
-                      />
-                    ) : (
-                      <div>
-                        <div className="text-sm text-gray-700 mb-2">
-                          <p>期首繰越金:</p>
-                          <p className="ml-4">
-                            現金: {formatCurrency(Number(fy.starting_balance_cash))}
-                          </p>
-                          <p className="ml-4">
-                            銀行: {formatCurrency(Number(fy.starting_balance_bank))}
-                          </p>
+                              {editingFiscalYear === fy.id ? (
+                                <div className="mt-3">
+                                  <EditFiscalYearForm
+                                    fiscalYear={fy}
+                                    onSave={handleUpdateFiscalYear}
+                                    onCancel={() => setEditingFiscalYear(null)}
+                                  />
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => setEditingFiscalYear(fy.id)}
+                                  className="mt-2 text-sm text-indigo-600 hover:text-indigo-800 font-semibold"
+                                >
+                                  編集
+                                </button>
+                              )}
+                            </div>
+                          </div>
                         </div>
-                        <button
-                          onClick={() => setEditingFiscalYear(fy.id)}
-                          className="text-sm text-indigo-600 hover:text-indigo-800 font-semibold"
-                        >
-                          編集
-                        </button>
-                      </div>
-                    )}
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="mt-4 text-sm text-gray-600 bg-blue-50 border border-blue-200 rounded p-3">
+                    <p className="font-semibold mb-1">💡 ヒント</p>
+                    <p>年度を削除する場合は、「データ管理」タブから削除してください。</p>
                   </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'category' && (
-            <div>
-              <h2 className="text-xl font-bold mb-4 text-gray-800">カテゴリー管理</h2>
-
-              {/* 新しいカテゴリーを追加 */}
-              <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
-                <h3 className="font-bold mb-3 text-gray-800">新しいカテゴリーを追加</h3>
-                <div className="flex gap-3">
-                  <select
-                    value={newCategoryType}
-                    onChange={(e) => setNewCategoryType(e.target.value as 'income' | 'expense')}
-                    className="p-2 border border-gray-300 rounded"
-                  >
-                    <option value="income">収入</option>
-                    <option value="expense">支出</option>
-                  </select>
-                  <input
-                    type="text"
-                    value={newCategoryName}
-                    onChange={(e) => setNewCategoryName(e.target.value)}
-                    placeholder="カテゴリー名"
-                    className="flex-1 p-2 border border-gray-300 rounded"
-                  />
-                  <button
-                    onClick={handleAddCategory}
-                    className="px-4 py-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded font-bold"
-                  >
-                    追加
-                  </button>
                 </div>
               </div>
+            )}
 
-              {/* 収入カテゴリー */}
-              <div className="mb-6">
-                <h3 className="font-bold mb-3 text-emerald-700">収入カテゴリー</h3>
-                <div className="space-y-2">
-                  {categories
-                    .filter((c) => c.type === 'income')
-                    .map((category) => (
-                      <CategoryItem
-                        key={category.id}
-                        category={category}
-                        isEditing={editingCategory === category.id}
-                        onEdit={() => setEditingCategory(category.id)}
-                        onSave={(newName) => handleUpdateCategory(category.id, newName)}
-                        onCancel={() => setEditingCategory(null)}
-                        onDelete={() => handleDeleteCategory(category.id, category.name)}
-                      />
-                    ))}
-                </div>
-              </div>
-
-              {/* 支出カテゴリー */}
+            {activeTab === 'category' && (
               <div>
-                <h3 className="font-bold mb-3 text-rose-700">支出カテゴリー</h3>
-                <div className="space-y-2">
-                  {categories
-                    .filter((c) => c.type === 'expense')
-                    .map((category) => (
-                      <CategoryItem
-                        key={category.id}
-                        category={category}
-                        isEditing={editingCategory === category.id}
-                        onEdit={() => setEditingCategory(category.id)}
-                        onSave={(newName) => handleUpdateCategory(category.id, newName)}
-                        onCancel={() => setEditingCategory(null)}
-                        onDelete={() => handleDeleteCategory(category.id, category.name)}
-                      />
-                    ))}
+                <h2 className="text-xl font-bold mb-4 text-gray-800">カテゴリー管理</h2>
+
+                {/* 新しいカテゴリーを追加 */}
+                <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                  <h3 className="font-bold mb-3 text-gray-800">新しいカテゴリーを追加</h3>
+                  <div className="flex gap-3">
+                    <select
+                      value={newCategoryType}
+                      onChange={(e) => setNewCategoryType(e.target.value as 'income' | 'expense')}
+                      className="p-2 border border-gray-300 rounded"
+                    >
+                      <option value="income">収入</option>
+                      <option value="expense">支出</option>
+                    </select>
+                    <input
+                      type="text"
+                      value={newCategoryName}
+                      onChange={(e) => setNewCategoryName(e.target.value)}
+                      placeholder="カテゴリー名"
+                      className="flex-1 p-2 border border-gray-300 rounded"
+                    />
+                    <button
+                      onClick={handleAddCategory}
+                      className="px-4 py-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded font-bold"
+                    >
+                      追加
+                    </button>
+                  </div>
+                </div>
+
+                {/* 収入カテゴリー */}
+                <div className="mb-6">
+                  <h3 className="font-bold mb-3 text-emerald-700">収入カテゴリー</h3>
+                  <div className="space-y-2">
+                    {categories
+                      .filter((c) => c.type === 'income')
+                      .map((category) => (
+                        <CategoryItem
+                          key={category.id}
+                          category={category}
+                          isEditing={editingCategory === category.id}
+                          onEdit={() => setEditingCategory(category.id)}
+                          onSave={(newName) => handleUpdateCategory(category.id, newName)}
+                          onCancel={() => setEditingCategory(null)}
+                          onDelete={() => handleDeleteCategory(category.id, category.name)}
+                        />
+                      ))}
+                  </div>
+                </div>
+
+                {/* 支出カテゴリー */}
+                <div>
+                  <h3 className="font-bold mb-3 text-rose-700">支出カテゴリー</h3>
+                  <div className="space-y-2">
+                    {categories
+                      .filter((c) => c.type === 'expense')
+                      .map((category) => (
+                        <CategoryItem
+                          key={category.id}
+                          category={category}
+                          isEditing={editingCategory === category.id}
+                          onEdit={() => setEditingCategory(category.id)}
+                          onSave={(newName) => handleUpdateCategory(category.id, newName)}
+                          onCancel={() => setEditingCategory(null)}
+                          onDelete={() => handleDeleteCategory(category.id, category.name)}
+                        />
+                      ))}
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {activeTab === 'data' && (
-            <DataManagementView
-              storageUsage={storageUsage}
-              loadingUsage={loadingUsage}
-              onRefreshUsage={fetchStorageUsage}
-              allFiscalYears={allFiscalYears}
-              currentFiscalYear={currentFiscalYear}
-              onDeleteSuccess={refreshFiscalYears}
-            />
-          )}
-        </div>
-      </main>
-    </div>
+            {activeTab === 'data' && (
+              <DataManagementView
+                storageUsage={storageUsage}
+                loadingUsage={loadingUsage}
+                onRefreshUsage={fetchStorageUsage}
+                allFiscalYears={allFiscalYears}
+                currentFiscalYear={currentFiscalYear}
+                onDeleteSuccess={refreshFiscalYears}
+              />
+            )}
+          </div>
+        </main>
+      </div>
+    </ProtectedRoute>
   )
 }
 
-// 年度編集フォーム（全項目編集可能）
 function EditFiscalYearForm({
   fiscalYear,
   onSave,
@@ -561,7 +528,6 @@ function EditFiscalYearForm({
   )
 }
 
-// カテゴリーアイテム
 function CategoryItem({
   category,
   isEditing,
@@ -625,7 +591,6 @@ function CategoryItem({
   )
 }
 
-// データ管理ビュー
 function DataManagementView({
   storageUsage,
   loadingUsage,
@@ -644,7 +609,6 @@ function DataManagementView({
   const [archiving, setArchiving] = useState<number | null>(null)
   const [deleting, setDeleting] = useState<number | null>(null)
 
-  // 年度のアーカイブ（CSV+画像をZIPにまとめる）
   const handleArchiveFiscalYear = async (fiscalYearId: number, fiscalYearName: string) => {
     setArchiving(fiscalYearId)
 
@@ -693,7 +657,7 @@ function DataManagementView({
       // 領収書番号のマッピングを作成
       let receiptCounter = 1
       const receiptNoMap = new Map<string, number>()
-      const imageFileNameMap = new Map<string, string>() // 元のファイル名 -> 新しいファイル名
+      const imageFileNameMap = new Map<string, string>()
 
       transactions.forEach((t: any) => {
         if (t.receipt_image_url) {
@@ -701,7 +665,6 @@ function DataManagementView({
           if (!receiptNoMap.has(imageFileName)) {
             const receiptNo = receiptCounter++
             receiptNoMap.set(imageFileName, receiptNo)
-            // 拡張子を取得
             const ext = imageFileName.split('.').pop() || 'jpg'
             imageFileNameMap.set(imageFileName, `領収書${receiptNo}.${ext}`)
           }
@@ -710,19 +673,15 @@ function DataManagementView({
 
       // === 1. 提出用CSV（出納帳形式）を作成 ===
       const submitHeader = 'No,年,月,日,分類,摘要,領収書No,借方金額（収入）,貸方金額（支出）,差引残高\n'
-      
-      // 繰越金の行
       const carryForwardRow = `,,,,繰越,,,,${startingBalance}\n`
-      
       let balance = startingBalance
 
       const submitRows = transactions.map((t: any, index: number) => {
         const date = new Date(t.recorded_at)
-        const year = String(date.getFullYear()).slice(-2) // 24
+        const year = String(date.getFullYear()).slice(-2)
         const month = date.getMonth() + 1
         const day = date.getDate()
         
-        // 分類（カテゴリーを丸括弧で囲む）
         let category = ''
         if (t.type === 'income') {
           category = `(入)${t.category || '収入'}`
@@ -732,7 +691,6 @@ function DataManagementView({
           category = '(移)移動'
         }
 
-        // 摘要（内容と口座情報）
         let description = t.description
         if (t.type === 'transfer') {
           const fromAccount = getAccountName(t.from_account_id)
@@ -743,16 +701,14 @@ function DataManagementView({
           description = `${t.description} [${accountName}]`
         }
 
-        // 領収書番号
         let receiptNo = ''
         if (t.receipt_image_url) {
           const imageFileName = new URL(t.receipt_image_url).pathname.split('/').pop() || ''
           receiptNo = String(receiptNoMap.get(imageFileName) || '')
         }
 
-        // 金額と残高計算（数値のみ）
-        let debit = '' // 借方（収入）
-        let credit = '' // 貸方（支出）
+        let debit = ''
+        let credit = ''
         
         if (t.type === 'income') {
           debit = String(t.amount)
@@ -762,8 +718,8 @@ function DataManagementView({
           balance -= Number(t.amount)
         }
 
-  return `${index + 1},${year},${month},${day},${category},${description},${receiptNo},${debit},${credit},${balance}`
-}).join('\n')
+        return `${index + 1},${year},${month},${day},${category},${description},${receiptNo},${debit},${credit},${balance}`
+      }).join('\n')
 
       const submitCsvContent = '\uFEFF' + submitHeader + carryForwardRow + submitRows
 
@@ -803,7 +759,6 @@ function DataManagementView({
       const fullCsvContent = '\uFEFF' + fullHeader + fullRows
 
       // === 3. 決算報告書CSV を作成 ===
-      // カテゴリー別に集計
       const incomeSummary: { [key: string]: number } = {}
       const expenseSummary: { [key: string]: number } = {}
       let totalIncome = 0
@@ -821,42 +776,29 @@ function DataManagementView({
         }
       })
 
-      // 期末残高
       const endingBalance = startingBalance + totalIncome - totalExpense
 
-      // 決算報告書CSV（金額は数値のみ、Excelで計算可能）
       let statementCsv = '\uFEFF'
-
-      // 収入の部
       statementCsv += '1. 収入\n'
       statementCsv += '項目,金額,備考\n'
-
-      // 収入カテゴリー
+      
       Object.entries(incomeSummary).forEach(([category, amount]) => {
         statementCsv += `${category},${amount},\n`
       })
-
-      // 前年度からの繰越金
+      
       statementCsv += `前年度からの繰越金,${startingBalance},\n`
-
-      // 収入合計
       const totalIncomeWithCarryover = totalIncome + startingBalance
       statementCsv += `合計,${totalIncomeWithCarryover},\n`
       statementCsv += '\n'
-
-      // 支出の部
+      
       statementCsv += '2. 支出\n'
       statementCsv += '項目,金額,備考\n'
-
-      // 支出カテゴリー
+      
       Object.entries(expenseSummary).forEach(([category, amount]) => {
         statementCsv += `${category},${amount},\n`
       })
-
-      // 次年度への繰越金
+      
       statementCsv += `次年度への繰越金,${endingBalance},\n`
-
-      // 支出合計
       const totalExpenseWithCarryover = totalExpense + endingBalance
       statementCsv += `合計,${totalExpenseWithCarryover},\n`
       statementCsv += '\n'
@@ -864,13 +806,10 @@ function DataManagementView({
 
       // ZIPファイルを作成
       const zip = new JSZip()
-
-      // 3つのCSVをZIPに追加
       zip.file('出納帳_提出用.csv', submitCsvContent)
       zip.file('取引データ_完全版.csv', fullCsvContent)
       zip.file('決算報告書.csv', statementCsv)
 
-      // README（説明ファイル）を追加
       const readme = 
         `【アーカイブ内容】\n\n` +
         `1. 出納帳_提出用.csv\n` +
@@ -897,7 +836,6 @@ function DataManagementView({
 
       zip.file('README.txt', readme)
 
-      // 画像がある場合、ZIPに追加（新しいファイル名で）
       const imagesWithUrls = transactions?.filter((t: any) => t.receipt_image_url) || []
 
       if (imagesWithUrls.length > 0) {
@@ -908,22 +846,16 @@ function DataManagementView({
           `画像のダウンロード中です。しばらくお待ちください。`
         )
 
-        // 領収書フォルダを作成
         const receiptsFolder = zip.folder('領収書')
-        
         let successCount = 0
         let failCount = 0
-
-        // 重複を避けるため、処理済みファイル名を記録
         const processedFiles = new Set<string>()
 
-        // 画像を順番にダウンロードしてZIPに追加
         for (const transaction of imagesWithUrls) {
           try {
             const imageUrl = transaction.receipt_image_url
             const originalFileName = new URL(imageUrl).pathname.split('/').pop() || ''
             
-            // 既に処理済みならスキップ
             if (processedFiles.has(originalFileName)) {
               continue
             }
@@ -931,7 +863,6 @@ function DataManagementView({
 
             const newFileName = imageFileNameMap.get(originalFileName) || originalFileName
 
-            // 画像をfetchで取得
             const response = await fetch(imageUrl)
             if (!response.ok) throw new Error('Image fetch failed')
 
@@ -944,7 +875,6 @@ function DataManagementView({
           }
         }
 
-        // ZIPファイルを生成してダウンロード
         const zipBlob = await zip.generateAsync({ 
           type: 'blob',
           compression: 'DEFLATE',
@@ -986,7 +916,6 @@ function DataManagementView({
           )
         }
       } else {
-        // 画像がない場合もZIPで配布
         const zipBlob = await zip.generateAsync({ type: 'blob' })
         
         const zipLink = document.createElement('a')
@@ -1018,7 +947,6 @@ function DataManagementView({
     }
   }
 
-  // 年度データの完全削除
   const handleDeleteFiscalYearData = async (fiscalYearId: number, fiscalYearName: string) => {
     if (!confirm(
       `${fiscalYearName}のデータを完全に削除しますか？\n\n` +
@@ -1039,7 +967,6 @@ function DataManagementView({
     setDeleting(fiscalYearId)
 
     try {
-      // 画像URLを取得して削除
       const { data: transactions } = await supabase
         .from('transactions')
         .select('receipt_image_url')
@@ -1053,14 +980,12 @@ function DataManagementView({
         })
         .filter(Boolean) || []
 
-      // 画像を削除
       if (imageUrls.length > 0) {
         await supabase.storage
           .from('receipts')
           .remove(imageUrls as string[])
       }
 
-      // 履歴を削除（トランザクションIDから）
       const { data: txIds } = await supabase
         .from('transactions')
         .select('id')
@@ -1075,13 +1000,11 @@ function DataManagementView({
           .in('transaction_id', ids)
       }
 
-      // トランザクションを削除
       await supabase
         .from('transactions')
         .delete()
         .eq('fiscal_year_id', fiscalYearId)
 
-      // 年度を削除
       await supabase
         .from('fiscal_years')
         .delete()
@@ -1091,7 +1014,6 @@ function DataManagementView({
       onDeleteSuccess()
       onRefreshUsage()
 
-      // 削除した年度が現在選択中だった場合、ホームに戻る
       if (currentFiscalYear?.id === fiscalYearId) {
         window.location.href = '/'
       }
@@ -1109,6 +1031,18 @@ function DataManagementView({
 
   return (
     <div className="space-y-6">
+      {/* 警告文を追加 */}
+      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+        <h3 className="font-bold mb-2 text-yellow-900 flex items-center gap-2">
+          <span className="text-xl">⚠️</span>
+          年度の削除について
+        </h3>
+        <p className="text-sm text-yellow-800">
+          年度を削除する場合は、<strong>必ず先にアーカイブを作成</strong>してください。
+          削除したデータは復元できません。
+        </p>
+      </div>
+
       {/* 容量使用状況 */}
       <div>
         <div className="flex justify-between items-center mb-4">
@@ -1237,7 +1171,7 @@ function DataManagementView({
       <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
         <h3 className="font-bold mb-2 text-gray-800">📖 使い方</h3>
         <ol className="text-sm text-gray-700 space-y-1 list-decimal list-inside">
-          <li><strong>アーカイブ：</strong>年度データをCSVファイルでダウンロード（画像URLを含む）</li>
+          <li><strong>アーカイブ：</strong>年度データをZIPファイルでダウンロード（CSV+画像）</li>
           <li><strong>完全削除：</strong>データベースとストレージから完全に削除（容量を解放）</li>
           <li><strong>推奨運用：</strong>古い年度は「アーカイブ → 削除」の順で実行</li>
         </ol>
