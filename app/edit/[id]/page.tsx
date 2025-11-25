@@ -6,6 +6,8 @@ import { supabase } from '@/lib/supabase'
 import Header from '@/app/components/Header'
 import Image from 'next/image'
 import imageCompression from 'browser-image-compression'
+import ProtectedRoute from '@/app/components/ProtectedRoute'
+import { useAuth } from '@/app/contexts/AuthContext'
 
 type Transaction = {
   id: string
@@ -23,6 +25,8 @@ export default function EditPage() {
   const router = useRouter()
   const params = useParams()
   const id = params.id as string
+
+  const { userProfile } = useAuth()
 
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -164,24 +168,12 @@ export default function EditPage() {
       }
 
       // ユーザーを取得または作成
-      const { data: existingUser } = await supabase
-        .from('users')
-        .select('id')
-        .eq('name', userName)
-        .single()
-
-      let userId = existingUser?.id
-
-      if (!userId) {
-        const { data: newUser, error: userError } = await supabase
-          .from('users')
-          .insert({ name: userName, email: `${userName}@temp.com` })
-          .select('id')
-          .single()
-
-        if (userError) throw userError
-        userId = newUser.id
+      if (!userProfile) {
+        alert('ユーザー情報が取得できませんでした')
+        return
       }
+
+      const userId = userProfile.id
 
       // 変更前のデータを保存
       const oldData = { ...transaction }
@@ -294,6 +286,7 @@ export default function EditPage() {
   }
 
   return (
+    <ProtectedRoute>
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
       <Header
         title="取引を編集"
@@ -486,5 +479,6 @@ export default function EditPage() {
         </form>
       </main>
     </div>
+    </ProtectedRoute>
   )
 }

@@ -6,6 +6,8 @@ import { supabase } from '@/lib/supabase'
 import { useFiscalYear } from '../contexts/FiscalYearContext'
 import Header from '../components/Header'
 import Image from 'next/image'
+import ProtectedRoute from '../components/ProtectedRoute'
+import { useAuth } from '../contexts/AuthContext'
 
 type Account = {
   id: number
@@ -39,6 +41,7 @@ type LedgerTab = 'journal' | 'category' | 'statement'
 export default function LedgerPage() {
   const router = useRouter()
   const { currentFiscalYear } = useFiscalYear()
+  const { userProfile } = useAuth()
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
   const [loading, setLoading] = useState(true)
@@ -85,21 +88,15 @@ export default function LedgerPage() {
     }
   }
 
-  const handleDelete = async (transactionId: string, userName: string) => {
+  const handleDelete = async (transactionId: string) => {
+    if (!userProfile) {
+      alert('ユーザー情報が取得できませんでした')
+      return
+    }
+
     if (!confirm('本当に削除しますか？\n（履歴には残ります）')) return
 
     try {
-      const { data: user } = await supabase
-        .from('users')
-        .select('id')
-        .eq('name', userName)
-        .single()
-
-      if (!user) {
-        alert('ユーザーが見つかりません')
-        return
-      }
-
       const { data: transaction } = await supabase
         .from('transactions')
         .select('*')
@@ -122,7 +119,7 @@ export default function LedgerPage() {
       await supabase.from('transaction_history').insert({
         transaction_id: transactionId,
         action: 'deleted',
-        changed_by: user.id,
+        changed_by: userProfile.id,  // ← 修正
         old_data: transaction,
       })
 
@@ -311,6 +308,7 @@ export default function LedgerPage() {
   const statementData = getStatementData()
 
   return (
+    <ProtectedRoute>
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
       <Header
         title="帳簿"
@@ -400,6 +398,7 @@ export default function LedgerPage() {
         </div>
       </main>
     </div>
+    </ProtectedRoute>
   )
 }
 
