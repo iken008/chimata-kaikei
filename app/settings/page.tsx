@@ -45,8 +45,15 @@ export default function SettingsPage() {
   const [loadingUsage, setLoadingUsage] = useState(false)
 
   useEffect(() => {
-    console.log('allFiscalYears:', allFiscalYears)
-  }, [allFiscalYears])
+    fetchCategories()
+  }, [])
+
+  // タブが 'category' に切り替わった時にもカテゴリーを取得
+  useEffect(() => {
+    if (activeTab === 'category') {
+      fetchCategories()
+    }
+  }, [activeTab])
 
   const fetchCategories = async () => {
     const { data, error } = await supabase
