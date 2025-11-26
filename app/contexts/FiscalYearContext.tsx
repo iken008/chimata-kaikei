@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react'
 import { supabase } from '@/lib/supabase'
+import { useAuth } from './AuthContext'
 
 type FiscalYear = {
   id: number
@@ -24,16 +25,21 @@ type FiscalYearContextType = {
 const FiscalYearContext = createContext<FiscalYearContextType | undefined>(undefined)
 
 export function FiscalYearProvider({ children }: { children: ReactNode }) {
+  const { user, loading: authLoading } = useAuth()
   const [currentFiscalYear, setCurrentFiscalYearState] = useState<FiscalYear | null>(null)
   const [allFiscalYears, setAllFiscalYears] = useState<FiscalYear[]>([])
   const [loading, setLoading] = useState(true)
 
   const fetchFiscalYears = async () => {
+    console.log('🔍 FiscalYearContext: fetchFiscalYears 開始')
     try {
+      console.log('🔍 FiscalYearContext: データベース問い合わせ開始')
       const { data, error } = await supabase
         .from('fiscal_years')
         .select('*')
         .order('start_date', { ascending: false })
+
+      console.log('🔍 FiscalYearContext: データベース問い合わせ完了', { data, error })
 
       if (error) throw error
 
@@ -50,8 +56,21 @@ export function FiscalYearProvider({ children }: { children: ReactNode }) {
   }
 
   useEffect(() => {
-    fetchFiscalYears()
-  }, [])
+    console.log('🔍 FiscalYearContext: useEffect 実行', { authLoading, user: !!user })
+
+    // 認証の読み込みが完了するまで待つ
+    if (authLoading) {
+      return
+    }
+
+    // ユーザーがログインしている場合のみデータを取得
+    if (user) {
+      fetchFiscalYears()
+    } else {
+      console.log('🔍 FiscalYearContext: ユーザー未ログイン、loading = false')
+      setLoading(false)
+    }
+  }, [user, authLoading])
 
   const setCurrentFiscalYear = async (fiscalYear: FiscalYear) => {
     try {

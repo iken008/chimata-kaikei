@@ -147,6 +147,25 @@ export default function RecordPage() {
       }
     }
 
+    // 年度期間チェック
+    if (!currentFiscalYear) {
+      alert('年度が選択されていません')
+      return
+    }
+
+    const txDate = new Date(transactionDate)
+    const startDate = new Date(currentFiscalYear.start_date)
+    const endDate = new Date(currentFiscalYear.end_date)
+
+    if (txDate < startDate || txDate > endDate) {
+      alert(
+        `取引日は年度期間内で指定してください\n\n` +
+        `${currentFiscalYear.name}: ${currentFiscalYear.start_date} ～ ${currentFiscalYear.end_date}\n\n` +
+        `指定された取引日: ${transactionDate}`
+      )
+      return
+    }
+
     setLoading(true)
 
     try {
@@ -295,9 +314,16 @@ export default function RecordPage() {
                 type="date"
                 value={transactionDate}
                 onChange={(e) => setTransactionDate(e.target.value)}
+                min={currentFiscalYear?.start_date}
+                max={currentFiscalYear?.end_date}
                 className="w-full p-3 border border-gray-300 rounded-lg"
                 required
               />
+              {currentFiscalYear && (
+                <p className="text-xs text-gray-500 mt-1">
+                  📅 {currentFiscalYear.name}の期間: {currentFiscalYear.start_date} ～ {currentFiscalYear.end_date}
+                </p>
+              )}
             </div>
 
             {/* カテゴリー（収入・支出の場合のみ） */}
