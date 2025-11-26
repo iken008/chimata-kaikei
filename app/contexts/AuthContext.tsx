@@ -10,7 +10,7 @@ type AuthContextType = {
   userProfile: UserProfile | null
   loading: boolean
   signIn: (email: string, password: string) => Promise<void>
-  signUp: (email: string, password: string, name: string) => Promise<void>
+  signUp: (email: string, password: string, name: string, inviteCodeId?: string) => Promise<void>
   signOut: () => Promise<void>
 }
 
@@ -136,7 +136,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (error) throw error
   }
 
-  const signUp = async (email: string, password: string, name: string) => {
+  const signUp = async (email: string, password: string, name: string, inviteCodeId?: string) => {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
@@ -151,19 +151,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // ユーザー登録成功後、usersテーブルにレコードを作成
     if (data.user) {
-      const { error: insertError } = await supabase
+      const { data: userData, error: insertError } = await supabase
         .from('users')
         .insert({
           auth_user_id: data.user.id,
           email: email,
           name: name,
         })
+        .select('id')
+        .single()
 
       if (insertError) {
         console.error('Error creating user profile:', insertError)
-        // エラーが発生してもサインアップ自体は成功しているので、
-        // エラーを投げずに警告のみ表示
-        console.warn('User profile creation failed, but authentication succeeded')
+        throw new Error('ユーザープロフィールの作成に失敗しました')
+      }
+
+      // 招待コードを使用済みにする
+      if (inviteCodeId && userData) {
+        const { error: updateError } = await supabase
+          .from('invite_codes')
+          .update({
+            is_used: true,
+            used_by: userData.id,
+            used_at: new Date().toISOString(),
+          })
+          .eq('id', inviteCodeId)
+
+        if (updateError) {
+          console.error('Error updating invite code:', updateError)
+          // 招待コードの更新失敗はエラーとしない（ユーザー登録は成功しているため）
+        }
       }
     }
   }
