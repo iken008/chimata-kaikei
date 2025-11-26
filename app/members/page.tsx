@@ -61,12 +61,10 @@ export default function MembersPage() {
 
       if (codesError) throw codesError
       
-      // 表示期限切れの使用済みコードを削除
+      // 有効期限が過ぎたコードを削除（使用済み・未使用問わず）
       const codesToDelete = codesData?.filter(code => {
-        if (!code.is_used || !code.used_at) return false
-        const oneHourAfterUsed = new Date(code.used_at)
-        oneHourAfterUsed.setHours(oneHourAfterUsed.getHours() + 1)
-        return oneHourAfterUsed < new Date()
+        if (!code.expires_at) return false
+        return new Date(code.expires_at) < new Date()
       }) || []
 
       if (codesToDelete.length > 0) {
@@ -219,7 +217,7 @@ export default function MembersPage() {
         return
       }
 
-      // ユーザーを削除
+      // usersテーブルから削除
       const { error: deleteError } = await supabase
         .from('users')
         .delete()
@@ -235,12 +233,33 @@ export default function MembersPage() {
         throw new Error(deleteError.message || '削除に失敗しました')
       }
 
-      // 認証ユーザーも削除（管理者権限が必要）
-      // Note: Supabase Auth Admin APIが必要なため、通常はバックエンドで処理すべき
-      // ここでは警告のみ表示
-      console.warn('認証ユーザーは削除されていません。Supabase Dashboardから手動で削除してください。')
+      // 認証ユーザーも削除（Admin API経由）
+      try {
+        const response = await fetch('/api/admin/delete-user', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ authUserId: member.auth_user_id }),
+        })
 
-      alert('メンバーを削除しました')
+        const data = await response.json()
+
+        if (!response.ok) {
+          console.error('Error deleting auth user:', data.error)
+          throw new Error('認証ユーザーの削除に失敗しました: ' + data.error)
+        }
+
+        console.log('認証ユーザーを削除しました:', member.auth_user_id)
+      } catch (authError: any) {
+        console.error('Auth deletion error:', authError)
+        // usersテーブルからは削除済みなので、警告のみ表示
+        alert(`メンバーをデータベースから削除しましたが、認証ユーザーの削除に失敗しました。\n\n${authError.message}\n\nSupabase Dashboardから手動で削除してください。`)
+        fetchData()
+        return
+      }
+
+      alert('メンバーを完全に削除しました')
       fetchData()
     } catch (error: any) {
       console.error('Error deleting member:', error)
@@ -263,13 +282,6 @@ export default function MembersPage() {
     return new Date(expiresAt) < new Date()
   }
 
-  const isUsedCodeDisplayExpired = (usedAt: string | null) => {
-    if (!usedAt) return false
-    // 使用日から1時間後に表示期限切れ
-    const oneHourAfterUsed = new Date(usedAt)
-    oneHourAfterUsed.setHours(oneHourAfterUsed.getHours() + 1)
-    return oneHourAfterUsed < new Date()
-  }
 
   if (loading) {
     return (
@@ -282,7 +294,7 @@ export default function MembersPage() {
   }
 
   const activeInviteCodes = inviteCodes.filter(c => !c.is_used && !isExpired(c.expires_at))
-  const usedInviteCodes = inviteCodes.filter(c => c.is_used && !isUsedCodeDisplayExpired(c.used_at))
+  const usedInviteCodes = inviteCodes.filter(c => c.is_used)
   const expiredInviteCodes = inviteCodes.filter(c => !c.is_used && isExpired(c.expires_at))
 
   return (
@@ -298,16 +310,16 @@ export default function MembersPage() {
 
         <main className="container mx-auto p-4 max-w-4xl">
           {/* 招待コード生成 */}
-          <div className="bg-white rounded-xl shadow-md p-6 mb-6 border border-gray-100">
-            <div className="flex items-center justify-between mb-4">
+          <div className="bg-white rounded-xl shadow-md p-4 sm:p-6 mb-6 border border-gray-100">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4">
               <div className="flex items-center">
-                <span className="text-2xl mr-2">🎫</span>
-                <h2 className="text-xl font-bold text-gray-800">招待コード</h2>
+                <span className="text-xl sm:text-2xl mr-2">🎫</span>
+                <h2 className="text-lg sm:text-xl font-bold text-gray-800">招待コード</h2>
               </div>
               <button
                 onClick={generateInviteCode}
                 disabled={generating}
-                className="bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-bold py-2 px-4 rounded-lg transition disabled:opacity-50"
+                className="w-full sm:w-auto bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-bold py-2 px-3 sm:px-4 rounded-lg transition disabled:opacity-50 text-sm sm:text-base"
               >
                 {generating ? '生成中...' : '➕ 新しいコードを生成'}
               </button>
@@ -365,6 +377,12 @@ export default function MembersPage() {
                           使用者: {invite.used_by_user?.name || '不明'} | 使用日: {formatDateTime(invite.used_at!)}
                         </p>
                       </div>
+                      <button
+                        onClick={() => deleteInviteCode(invite.id, invite.code)}
+                        className="px-3 py-1 text-red-600 hover:bg-red-50 text-sm rounded font-semibold transition"
+                      >
+                        削除
+                      </button>
                     </div>
                   ))}
                 </div>
@@ -468,7 +486,8 @@ export default function MembersPage() {
               <li>登録完了後、メンバー一覧に表示されます</li>
             </ol>
             <p className="text-xs text-blue-700 mt-2">
-              ※ 招待コードの有効期限は1時間です
+              ※ 招待コードの有効期限は1時間です<br />
+              ※ 有効期限が過ぎたコードは自動削除されます（使用済み・未使用問わず）
             </p>
           </div>
         </main>

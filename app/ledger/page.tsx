@@ -539,13 +539,13 @@ function JournalView({
             {transactions.map((transaction: any) => (
               <div
                 key={transaction.id}
-                className="border rounded-lg p-4 hover:bg-gray-50 relative group"
+                className="border rounded-lg p-3 sm:p-4 hover:bg-gray-50 relative group"
               >
-                {/* 編集・削除ボタン（控えめに） */}
-                <div className="absolute top-3 right-3 flex gap-1 opacity-0 group-hover:opacity-100 transition">
+                {/* 編集・削除ボタン */}
+                <div className="absolute top-3 right-3 flex gap-1 opacity-70 sm:opacity-0 sm:group-hover:opacity-100 transition">
                   <button
                     onClick={() => onEdit(transaction.id)}
-                    className="p-1 text-gray-400 hover:text-blue-600 transition"
+                    className="p-1.5 sm:p-1 bg-white sm:bg-transparent shadow-sm sm:shadow-none rounded sm:rounded-none text-gray-600 sm:text-gray-400 hover:text-blue-600 transition"
                     title="編集"
                   >
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -553,11 +553,8 @@ function JournalView({
                     </svg>
                   </button>
                   <button
-                    onClick={() => {
-                      const userName = prompt('あなたの名前を入力してください:')
-                      if (userName) onDelete(transaction.id, userName)
-                    }}
-                    className="p-1 text-gray-400 hover:text-red-600 transition"
+                    onClick={() => onDelete(transaction.id)}
+                    className="p-1.5 sm:p-1 bg-white sm:bg-transparent shadow-sm sm:shadow-none rounded sm:rounded-none text-gray-600 sm:text-gray-400 hover:text-red-600 transition"
                     title="削除"
                   >
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -566,40 +563,42 @@ function JournalView({
                   </button>
                 </div>
 
-                <div className="flex justify-between items-start mb-2 pr-16">
+                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start mb-2 pr-12 sm:pr-16">
                   <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="bg-blue-100 text-blue-800 text-xs font-semibold px-2 py-1 rounded">
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 mb-2">
+                      <span className="bg-blue-100 text-blue-800 text-xs font-semibold px-2 py-1 rounded w-fit">
                         {getTypeLabel(transaction.type)}
                       </span>
-                      <span className="text-sm text-gray-500">
+                      <span className="text-xs sm:text-sm text-gray-500">
                         {formatDateTime(transaction.recorded_at)}
                       </span>
                     </div>
-                    <p className="font-bold text-lg">{transaction.description}</p>
-                    
-                    {transaction.category && (
-                      <p className="text-sm text-gray-600">
-                        カテゴリー: {transaction.category}
+                    <p className="font-bold text-base sm:text-lg mb-2">{transaction.description}</p>
+
+                    <div className="space-y-1 mb-3 sm:mb-0">
+                      {transaction.category && (
+                        <p className="text-xs sm:text-sm text-gray-600">
+                          カテゴリー: {transaction.category}
+                        </p>
+                      )}
+
+                      {transaction.type === 'transfer' ? (
+                        <p className="text-xs sm:text-sm text-gray-600">
+                          {getAccountName(transaction.from_account_id)} → {getAccountName(transaction.to_account_id)}
+                        </p>
+                      ) : (
+                        <p className="text-xs sm:text-sm text-gray-600">
+                          口座: {getAccountName(transaction.account_id)}
+                        </p>
+                      )}
+
+                      <p className="text-xs sm:text-sm text-gray-500">
+                        記入者: {transaction.users.name}
                       </p>
-                    )}
-                    
-                    {transaction.type === 'transfer' ? (
-                      <p className="text-sm text-gray-600">
-                        {getAccountName(transaction.from_account_id)} → {getAccountName(transaction.to_account_id)}
-                      </p>
-                    ) : (
-                      <p className="text-sm text-gray-600">
-                        口座: {getAccountName(transaction.account_id)}
-                      </p>
-                    )}
-                    
-                    <p className="text-sm text-gray-500">
-                      記入者: {transaction.users.name}
-                    </p>
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <p className={`text-2xl font-bold ${
+                  <div className="text-left sm:text-right mt-2 sm:mt-0">
+                    <p className={`text-xl sm:text-2xl font-bold ${
                       transaction.type === 'income' ? 'text-green-600' :
                       transaction.type === 'expense' ? 'text-red-600' :
                       'text-blue-600'

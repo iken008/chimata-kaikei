@@ -85,7 +85,7 @@ export default function LoginPage() {
 
         <div className="mt-6 text-center">
           <p className="text-gray-600 text-sm">
-            招待リンクをお持ちの方は
+            招待コードをお持ちの方は
             <Link href="/signup" className="text-indigo-600 hover:text-indigo-800 font-semibold ml-1">
               こちらから登録
             </Link>
