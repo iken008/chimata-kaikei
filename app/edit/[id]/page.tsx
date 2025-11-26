@@ -38,7 +38,6 @@ export default function EditPage() {
   const [accountId, setAccountId] = useState('1')
   const [fromAccountId, setFromAccountId] = useState('1')
   const [toAccountId, setToAccountId] = useState('2')
-  const [userName, setUserName] = useState('')
   const [receiptImage, setReceiptImage] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [existingImageUrl, setExistingImageUrl] = useState<string | null>(null)
@@ -144,8 +143,8 @@ export default function EditPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    
-    if (!amount || !description || !userName) {
+
+    if (!amount || !description) {
       alert('全ての項目を入力してください')
       return
     }
@@ -194,6 +193,23 @@ export default function EditPage() {
         newTransactionData.account_id = parseInt(accountId)
         newTransactionData.from_account_id = null
         newTransactionData.to_account_id = null
+      }
+
+      // 変更があるかチェック
+      const hasChanges =
+        oldData.type !== newTransactionData.type ||
+        oldData.amount !== newTransactionData.amount ||
+        oldData.description !== newTransactionData.description ||
+        oldData.receipt_image_url !== newTransactionData.receipt_image_url ||
+        oldData.account_id !== newTransactionData.account_id ||
+        oldData.from_account_id !== newTransactionData.from_account_id ||
+        oldData.to_account_id !== newTransactionData.to_account_id
+
+      // 変更がない場合はそのまま戻る
+      if (!hasChanges) {
+        alert('変更がありませんでした')
+        router.push('/ledger')
+        return
       }
 
       // 残高を元に戻す（古いトランザクション）
@@ -455,17 +471,20 @@ export default function EditPage() {
             </div>
           )}
 
-          {/* 編集者名 */}
+          {/* 編集者（自動） */}
           <div className="mb-6">
-            <label className="block text-gray-700 font-bold mb-2">編集者名</label>
+            <label className="block text-gray-700 font-bold mb-2">
+              編集者
+            </label>
             <input
               type="text"
-              value={userName}
-              onChange={(e) => setUserName(e.target.value)}
-              className="w-full p-3 border border-gray-300 rounded-lg"
-              placeholder="山田太郎"
-              required
+              value={userProfile?.name || ''}
+              disabled
+              className="w-full p-3 border border-gray-300 rounded-lg bg-gray-100 cursor-not-allowed"
             />
+            <p className="text-xs text-gray-500 mt-1">
+              ログインユーザーの名前が自動的に記録されます
+            </p>
           </div>
 
           {/* 送信ボタン */}
