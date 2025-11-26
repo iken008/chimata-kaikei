@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useFiscalYear } from '../contexts/FiscalYearContext'
@@ -48,6 +48,22 @@ export default function RecordPage() {
   const [loading, setLoading] = useState(false)
   const [receiptImage, setReceiptImage] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+
+  // 年度が変更されたら日付を自動設定
+  useEffect(() => {
+    if (currentFiscalYear) {
+      const today = new Date().toISOString().split('T')[0]
+      const startDate = currentFiscalYear.start_date
+      const endDate = currentFiscalYear.end_date
+
+      // 今日が年度の範囲内なら今日を使う、範囲外なら年度の開始日を使う
+      if (today >= startDate && today <= endDate) {
+        setTransactionDate(today)
+      } else {
+        setTransactionDate(startDate)
+      }
+    }
+  }, [currentFiscalYear])
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]

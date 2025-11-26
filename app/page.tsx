@@ -33,6 +33,7 @@ export default function Home() {
   const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([])
   const [monthlyStats, setMonthlyStats] = useState({ income: 0, expense: 0 })
   const [loading, setLoading] = useState(true)
+  const [storageUsage, setStorageUsage] = useState<{ used: number; limit: number; percentage: number } | null>(null)
 
   useEffect(() => {
     if (fiscalYearLoading) {
@@ -42,11 +43,41 @@ export default function Home() {
 
     if (currentFiscalYear) {
       fetchData()
+      checkStorageUsage()
     } else {
       // currentFiscalYearがない場合（ログインしていない場合）もloadingをfalseに
       setLoading(false)
     }
   }, [currentFiscalYear, fiscalYearLoading])
+
+  const checkStorageUsage = async () => {
+    try {
+      // receiptsバケットのファイル一覧を取得
+      const { data: files, error } = await supabase.storage
+        .from('receipts')
+        .list()
+
+      if (error) {
+        console.error('Error fetching storage files:', error)
+        return
+      }
+
+      // 総ファイルサイズを計算（バイト）
+      const totalSize = files?.reduce((sum, file) => sum + (file.metadata?.size || 0), 0) || 0
+
+      // Supabase無料プランのストレージ制限: 1GB = 1,073,741,824バイト
+      const storageLimit = 1073741824
+      const usagePercentage = (totalSize / storageLimit) * 100
+
+      setStorageUsage({
+        used: totalSize,
+        limit: storageLimit,
+        percentage: usagePercentage
+      })
+    } catch (error) {
+      console.error('Error checking storage:', error)
+    }
+  }
 
   const fetchData = async () => {
     if (!currentFiscalYear) return
@@ -166,6 +197,29 @@ export default function Home() {
 
       {/* メインコンテンツ */}
       <main className="container mx-auto p-4 max-w-4xl">
+        {/* ストレージ容量警告 */}
+        {storageUsage && storageUsage.percentage >= 80 && (
+          <div className="bg-amber-50 border-l-4 border-amber-500 p-4 mb-6 rounded-r-lg">
+            <div className="flex items-start">
+              <span className="text-2xl mr-3">⚠️</span>
+              <div className="flex-1">
+                <h3 className="font-bold text-amber-800 mb-1">ストレージ容量が不足しています</h3>
+                <p className="text-sm text-amber-700 mb-2">
+                  現在の使用量: {(storageUsage.used / 1024 / 1024).toFixed(2)} MB / {(storageUsage.limit / 1024 / 1024).toFixed(0)} MB
+                  （{storageUsage.percentage.toFixed(1)}%）
+                </p>
+                <div className="text-sm text-amber-700 bg-amber-100 p-3 rounded">
+                  <p className="font-semibold mb-1">💡 データ整理の手順：</p>
+                  <ol className="list-decimal list-inside space-y-1">
+                    <li>古い年度のデータを<strong>アーカイブ（エクスポート）</strong></li>
+                    <li>アーカイブ後、不要な年度を削除</li>
+                  </ol>
+                  <p className="mt-2 text-xs">※ 年度管理ページからエクスポート・削除が可能です</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
         {/* 残高表示 */}
         <div className="bg-white rounded-xl shadow-md p-6 mb-6 border border-gray-100">
           <div className="flex items-center mb-4">
@@ -200,27 +254,27 @@ export default function Home() {
         </div>
 
         {/* 今月の収支 */}
-        <div className="bg-white rounded-xl shadow-md p-6 mb-6 border border-gray-100">
+        <div className="bg-white rounded-xl shadow-md p-4 sm:p-6 mb-6 border border-gray-100">
           <div className="flex items-center mb-4">
-            <span className="text-2xl mr-2">📊</span>
-            <h2 className="text-xl font-bold text-gray-800">今月の収支</h2>
+            <span className="text-xl sm:text-2xl mr-2">📊</span>
+            <h2 className="text-lg sm:text-xl font-bold text-gray-800">今月の収支</h2>
           </div>
-          <div className="grid grid-cols-3 gap-4">
-            <div className="text-center p-4 bg-emerald-50 rounded-lg">
-              <p className="text-sm text-emerald-600 font-semibold mb-2">収入</p>
-              <p className="text-2xl font-bold text-emerald-600">
+          <div className="grid grid-cols-3 gap-2 sm:gap-4">
+            <div className="text-center p-2 sm:p-4 bg-emerald-50 rounded-lg">
+              <p className="text-xs sm:text-sm text-emerald-600 font-semibold mb-1 sm:mb-2">収入</p>
+              <p className="text-sm sm:text-2xl font-bold text-emerald-600">
                 +{formatCurrency(monthlyStats.income)}
               </p>
             </div>
-            <div className="text-center p-4 bg-rose-50 rounded-lg">
-              <p className="text-sm text-rose-600 font-semibold mb-2">支出</p>
-              <p className="text-2xl font-bold text-rose-600">
+            <div className="text-center p-2 sm:p-4 bg-rose-50 rounded-lg">
+              <p className="text-xs sm:text-sm text-rose-600 font-semibold mb-1 sm:mb-2">支出</p>
+              <p className="text-sm sm:text-2xl font-bold text-rose-600">
                 -{formatCurrency(monthlyStats.expense)}
               </p>
             </div>
-            <div className="text-center p-4 bg-indigo-50 rounded-lg">
-              <p className="text-sm text-indigo-600 font-semibold mb-2">収支</p>
-              <p className={`text-2xl font-bold ${
+            <div className="text-center p-2 sm:p-4 bg-indigo-50 rounded-lg">
+              <p className="text-xs sm:text-sm text-indigo-600 font-semibold mb-1 sm:mb-2">収支</p>
+              <p className={`text-sm sm:text-2xl font-bold ${
                 monthlyBalance >= 0 ? 'text-indigo-600' : 'text-rose-600'
               }`}>
                 {monthlyBalance >= 0 ? '+' : ''}
