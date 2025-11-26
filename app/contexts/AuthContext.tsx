@@ -29,18 +29,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter()
 
   useEffect(() => {
+    console.log('🔍 AuthContext: useEffect 開始')
+
     // 現在のセッションを確認
+    console.log('🔍 AuthContext: getSession 呼び出し')
     supabase.auth.getSession()
       .then(({ data: { session } }) => {
+        console.log('🔍 AuthContext: getSession 完了', session ? 'ユーザーあり' : 'ユーザーなし')
         setUser(session?.user ?? null)
         if (session?.user) {
+          console.log('🔍 AuthContext: fetchUserProfile 呼び出し')
           fetchUserProfile(session.user.id)
         } else {
+          console.log('🔍 AuthContext: loading = false (セッションなし)')
           setLoading(false)
         }
       })
       .catch((error) => {
-        console.error('Error getting session:', error)
+        console.error('❌ Error getting session:', error)
         setLoading(false)
       })
 
@@ -61,17 +67,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const fetchUserProfile = async (authUserId: string) => {
+    console.log('🔍 fetchUserProfile 開始:', authUserId)
     try {
+      console.log('🔍 fetchUserProfile: データベース問い合わせ開始')
       const { data, error } = await supabase
         .from('users')
         .select('id, name, email')
         .eq('auth_user_id', authUserId)
         .single()
 
+      console.log('🔍 fetchUserProfile: データベース問い合わせ完了', { data, error })
+
       if (error) {
         // PGRST116: ユーザープロフィールが見つからない場合
         if (error.code === 'PGRST116') {
-          console.warn('User profile not found in database for auth_user_id:', authUserId)
+          console.warn('⚠️ User profile not found in database for auth_user_id:', authUserId)
 
           // 認証ユーザー情報からプロフィールを自動作成
           const { data: { user } } = await supabase.auth.getUser()
