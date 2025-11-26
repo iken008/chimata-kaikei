@@ -35,10 +35,18 @@ export default function Home() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    if (fiscalYearLoading) {
+      // FiscalYearContextの読み込み中は何もしない
+      return
+    }
+
     if (currentFiscalYear) {
       fetchData()
+    } else {
+      // currentFiscalYearがない場合（ログインしていない場合）もloadingをfalseに
+      setLoading(false)
     }
-  }, [currentFiscalYear])
+  }, [currentFiscalYear, fiscalYearLoading])
 
   const fetchData = async () => {
     if (!currentFiscalYear) return
