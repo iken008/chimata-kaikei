@@ -30,14 +30,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     // 現在のセッションを確認
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null)
-      if (session?.user) {
-        fetchUserProfile(session.user.id)
-      } else {
+    supabase.auth.getSession()
+      .then(({ data: { session } }) => {
+        setUser(session?.user ?? null)
+        if (session?.user) {
+          fetchUserProfile(session.user.id)
+        } else {
+          setLoading(false)
+        }
+      })
+      .catch((error) => {
+        console.error('Error getting session:', error)
         setLoading(false)
-      }
-    })
+      })
 
     // 認証状態の変化を監視
     const {
@@ -63,10 +68,51 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .eq('auth_user_id', authUserId)
         .single()
 
-      if (error) throw error
-      setUserProfile(data)
+      if (error) {
+        // PGRST116: ユーザープロフィールが見つからない場合
+        if (error.code === 'PGRST116') {
+          console.warn('User profile not found in database for auth_user_id:', authUserId)
+
+          // 認証ユーザー情報からプロフィールを自動作成
+          const { data: { user } } = await supabase.auth.getUser()
+          if (user) {
+            const newProfile = {
+              auth_user_id: user.id,
+              email: user.email || '',
+              name: user.user_metadata?.name || user.email?.split('@')[0] || 'ユーザー',
+            }
+
+            const { data: createdProfile, error: insertError } = await supabase
+              .from('users')
+              .insert(newProfile)
+              .select('id, name, email')
+              .single()
+
+            if (insertError) {
+              console.error('Error creating user profile:', insertError)
+              setUserProfile(null)
+            } else {
+              console.log('User profile created successfully:', createdProfile)
+              setUserProfile(createdProfile)
+            }
+          } else {
+            setUserProfile(null)
+          }
+        } else {
+          console.error('Error fetching user profile:', {
+            message: error.message,
+            code: error.code,
+            details: error.details,
+            hint: error.hint,
+          })
+          setUserProfile(null)
+        }
+      } else {
+        setUserProfile(data)
+      }
     } catch (error) {
-      console.error('Error fetching user profile:', error)
+      console.error('Unexpected error fetching user profile:', error)
+      setUserProfile(null)
     } finally {
       setLoading(false)
     }
@@ -81,7 +127,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   const signUp = async (email: string, password: string, name: string) => {
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -91,6 +137,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       },
     })
     if (error) throw error
+
+    // ユーザー登録成功後、usersテーブルにレコードを作成
+    if (data.user) {
+      const { error: insertError } = await supabase
+        .from('users')
+        .insert({
+          auth_user_id: data.user.id,
+          email: email,
+          name: name,
+        })
+
+      if (insertError) {
+        console.error('Error creating user profile:', insertError)
+        // エラーが発生してもサインアップ自体は成功しているので、
+        // エラーを投げずに警告のみ表示
+        console.warn('User profile creation failed, but authentication succeeded')
+      }
+    }
   }
 
   const signOut = async () => {

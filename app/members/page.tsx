@@ -165,18 +165,86 @@ export default function MembersPage() {
     }
 
     try {
-      const { error } = await supabase
+      // まず、関連データを確認
+      const { data: transactions, error: transactionsError } = await supabase
+        .from('transactions')
+        .select('id')
+        .eq('recorded_by', member.id)
+        .limit(1)
+
+      if (transactionsError) {
+        console.error('Error checking transactions:', transactionsError)
+        throw new Error('関連データの確認に失敗しました')
+      }
+
+      if (transactions && transactions.length > 0) {
+        alert(
+          '削除できません\n\n' +
+          'このユーザーが記録した取引データが存在します。\n' +
+          'データの整合性を保つため、記録のあるユーザーは削除できません。'
+        )
+        return
+      }
+
+      // 招待コードの使用履歴を確認
+      const { data: usedInvites, error: usedInvitesError } = await supabase
+        .from('invite_codes')
+        .select('id')
+        .eq('used_by', member.id)
+        .limit(1)
+
+      if (usedInvitesError) {
+        console.error('Error checking used invites:', usedInvitesError)
+        throw new Error('関連データの確認に失敗しました')
+      }
+
+      // 招待コードの作成履歴を確認
+      const { data: createdInvites, error: createdInvitesError } = await supabase
+        .from('invite_codes')
+        .select('id')
+        .eq('created_by', member.id)
+        .limit(1)
+
+      if (createdInvitesError) {
+        console.error('Error checking created invites:', createdInvitesError)
+        throw new Error('関連データの確認に失敗しました')
+      }
+
+      if ((usedInvites && usedInvites.length > 0) || (createdInvites && createdInvites.length > 0)) {
+        alert(
+          '削除できません\n\n' +
+          'このユーザーに関連する招待コードが存在します。\n' +
+          'データの整合性を保つため、招待コードを使用したユーザーまたは作成したユーザーは削除できません。'
+        )
+        return
+      }
+
+      // ユーザーを削除
+      const { error: deleteError } = await supabase
         .from('users')
         .delete()
         .eq('id', member.id)
 
-      if (error) throw error
+      if (deleteError) {
+        console.error('Error deleting user:', {
+          message: deleteError.message,
+          code: deleteError.code,
+          details: deleteError.details,
+          hint: deleteError.hint,
+        })
+        throw new Error(deleteError.message || '削除に失敗しました')
+      }
+
+      // 認証ユーザーも削除（管理者権限が必要）
+      // Note: Supabase Auth Admin APIが必要なため、通常はバックエンドで処理すべき
+      // ここでは警告のみ表示
+      console.warn('認証ユーザーは削除されていません。Supabase Dashboardから手動で削除してください。')
 
       alert('メンバーを削除しました')
       fetchData()
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error deleting member:', error)
-      alert('削除に失敗しました')
+      alert(error.message || '削除に失敗しました')
     }
   }
 

@@ -94,7 +94,21 @@ export default function LedgerPage() {
       return
     }
 
-    if (!confirm('本当に削除しますか？\n（履歴には残ります）')) return
+    // 名前確認による削除承認
+    const inputName = prompt(
+      `削除を実行するには、あなたの名前を入力してください。\n\n` +
+      `あなたの名前: ${userProfile.name}\n\n` +
+      `※履歴には残ります`
+    )
+
+    // キャンセルされた場合
+    if (inputName === null) return
+
+    // 名前が一致しない場合
+    if (inputName.trim() !== userProfile.name) {
+      alert('名前が一致しません。削除できませんでした。')
+      return
+    }
 
     try {
       const { data: transaction } = await supabase

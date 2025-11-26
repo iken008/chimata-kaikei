@@ -214,14 +214,37 @@ export default function HistoryPage() {
   const getTransactionDisplay = (data: any) => {
     if (!data) return '（データなし）'
 
+    let display = ''
     if (data.type === 'income') {
-      return `収入: ${data.description} - ${formatCurrency(data.amount)} [${getAccountName(data.account_id)}]`
+      display = `収入: ${data.description} - ${formatCurrency(data.amount)} [${getAccountName(data.account_id)}]`
     } else if (data.type === 'expense') {
-      return `支出: ${data.description} - ${formatCurrency(data.amount)} [${getAccountName(data.account_id)}]`
+      display = `支出: ${data.description} - ${formatCurrency(data.amount)} [${getAccountName(data.account_id)}]`
     } else if (data.type === 'transfer') {
-      return `移動: ${data.description} - ${formatCurrency(data.amount)} [${getAccountName(data.from_account_id)}→${getAccountName(data.to_account_id)}]`
+      display = `移動: ${data.description} - ${formatCurrency(data.amount)} [${getAccountName(data.from_account_id)}→${getAccountName(data.to_account_id)}]`
+    } else {
+      display = '（不明）'
     }
-    return '（不明）'
+
+    // 領収書の有無を追加
+    if (data.receipt_image_url) {
+      display += ' 📎'
+    }
+
+    return display
+  }
+
+  const getReceiptChange = (oldData: any, newData: any) => {
+    const hadReceipt = oldData?.receipt_image_url
+    const hasReceipt = newData?.receipt_image_url
+
+    if (!hadReceipt && hasReceipt) {
+      return '📎 領収書を追加'
+    } else if (hadReceipt && !hasReceipt) {
+      return '📎 領収書を削除'
+    } else if (hadReceipt && hasReceipt && oldData.receipt_image_url !== newData.receipt_image_url) {
+      return '📎 領収書を変更'
+    }
+    return null
   }
 
   if (loading) {
@@ -348,10 +371,17 @@ export default function HistoryPage() {
                             <span className="font-semibold text-red-600">変更前:</span>
                             <p className="ml-4">{getTransactionDisplay(record.old_data)}</p>
                           </div>
-                          <div>
+                          <div className="mb-2">
                             <span className="font-semibold text-green-600">変更後:</span>
                             <p className="ml-4">{getTransactionDisplay(record.new_data)}</p>
                           </div>
+                          {getReceiptChange(record.old_data, record.new_data) && (
+                            <div className="mt-2 pt-2 border-t border-gray-300">
+                              <span className="text-blue-600 font-semibold">
+                                {getReceiptChange(record.old_data, record.new_data)}
+                              </span>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
