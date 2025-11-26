@@ -91,31 +91,8 @@ export default function SignupPage() {
     setLoading(true)
 
     try {
-      // ユーザー登録
-      await signUp(email, password, name)
-
-      // 招待コードを使用済みにする
-      const { data: authData } = await supabase.auth.getUser()
-      
-      if (authData.user) {
-        // usersテーブルからユーザーIDを取得
-        const { data: userData } = await supabase
-          .from('users')
-          .select('id')
-          .eq('auth_user_id', authData.user.id)
-          .single()
-
-        if (userData) {
-          await supabase
-            .from('invite_codes')
-            .update({
-              is_used: true,
-              used_by: userData.id,
-              used_at: new Date().toISOString(),
-            })
-            .eq('id', verifiedCodeId)
-        }
-      }
+      // ユーザー登録（招待コードIDを渡す）
+      await signUp(email, password, name, verifiedCodeId || undefined)
 
       alert('登録が完了しました！確認メールを送信しました。メールを確認してログインしてください。')
       router.push('/login')
