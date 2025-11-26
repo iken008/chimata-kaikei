@@ -338,33 +338,33 @@ export default function LedgerPage() {
           <div className="flex">
             <button
               onClick={() => setActiveTab('journal')}
-              className={`flex-1 py-4 px-6 font-bold transition ${
+              className={`flex-1 py-3 sm:py-4 px-2 sm:px-6 font-bold text-xs sm:text-base transition ${
                 activeTab === 'journal'
                   ? 'bg-white text-violet-600 border-b-2 border-violet-600'
                   : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
               }`}
             >
-              📝 出納帳
+              <span className="hidden sm:inline">📝 </span>出納帳
             </button>
             <button
               onClick={() => setActiveTab('category')}
-              className={`flex-1 py-4 px-6 font-bold transition ${
+              className={`flex-1 py-3 sm:py-4 px-2 sm:px-6 font-bold text-xs sm:text-base transition ${
                 activeTab === 'category'
                   ? 'bg-white text-violet-600 border-b-2 border-violet-600'
                   : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
               }`}
             >
-              🏷️ 科目別台帳
+              <span className="hidden sm:inline">🏷️ </span>科目別
             </button>
             <button
               onClick={() => setActiveTab('statement')}
-              className={`flex-1 py-4 px-6 font-bold transition ${
+              className={`flex-1 py-3 sm:py-4 px-2 sm:px-6 font-bold text-xs sm:text-base transition ${
                 activeTab === 'statement'
                   ? 'bg-white text-violet-600 border-b-2 border-violet-600'
                   : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
               }`}
             >
-              📊 収支計算書
+              <span className="hidden sm:inline">📊 </span>収支
             </button>
           </div>
         </div>
@@ -435,6 +435,18 @@ function JournalView({
   getTypeLabel,
   getAccountName,
 }: any) {
+  const [expandedReceiptIds, setExpandedReceiptIds] = useState<Set<string>>(new Set())
+
+  const toggleReceipt = (id: string) => {
+    const newExpanded = new Set(expandedReceiptIds)
+    if (newExpanded.has(id)) {
+      newExpanded.delete(id)
+    } else {
+      newExpanded.add(id)
+    }
+    setExpandedReceiptIds(newExpanded)
+  }
+
   return (
     <>
       {/* フィルター */}
@@ -563,63 +575,71 @@ function JournalView({
                   </button>
                 </div>
 
-                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start mb-2 pr-12 sm:pr-16">
-                  <div className="flex-1">
-                    <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 mb-2">
-                      <span className="bg-blue-100 text-blue-800 text-xs font-semibold px-2 py-1 rounded w-fit">
-                        {getTypeLabel(transaction.type)}
-                      </span>
-                      <span className="text-xs sm:text-sm text-gray-500">
-                        {formatDateTime(transaction.recorded_at)}
-                      </span>
-                    </div>
-                    <p className="font-bold text-base sm:text-lg mb-2">{transaction.description}</p>
-
-                    <div className="space-y-1 mb-3 sm:mb-0">
-                      {transaction.category && (
-                        <p className="text-xs sm:text-sm text-gray-600">
-                          カテゴリー: {transaction.category}
-                        </p>
-                      )}
-
-                      {transaction.type === 'transfer' ? (
-                        <p className="text-xs sm:text-sm text-gray-600">
-                          {getAccountName(transaction.from_account_id)} → {getAccountName(transaction.to_account_id)}
-                        </p>
-                      ) : (
-                        <p className="text-xs sm:text-sm text-gray-600">
-                          口座: {getAccountName(transaction.account_id)}
-                        </p>
-                      )}
-
-                      <p className="text-xs sm:text-sm text-gray-500">
-                        記入者: {transaction.users.name}
-                      </p>
-                    </div>
+                <div className="pr-12 sm:pr-16">
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 mb-2">
+                    <span className="bg-blue-100 text-blue-800 text-xs font-semibold px-2 py-1 rounded w-fit">
+                      {getTypeLabel(transaction.type)}
+                    </span>
+                    <span className="text-xs sm:text-sm text-gray-500">
+                      {formatDateTime(transaction.recorded_at)}
+                    </span>
                   </div>
-                  <div className="text-left sm:text-right mt-2 sm:mt-0">
-                    <p className={`text-xl sm:text-2xl font-bold ${
-                      transaction.type === 'income' ? 'text-green-600' :
-                      transaction.type === 'expense' ? 'text-red-600' :
-                      'text-blue-600'
-                    }`}>
-                      {transaction.type === 'income' ? '+' : transaction.type === 'expense' ? '-' : '±'}
-                      {formatCurrency(transaction.amount)}
+
+                  <p className="font-bold text-base sm:text-lg mb-2">{transaction.description}</p>
+
+                  <div className="space-y-1">
+                    {transaction.category && (
+                      <p className="text-xs sm:text-sm text-gray-600">
+                        カテゴリー: {transaction.category}
+                      </p>
+                    )}
+
+                    {transaction.type === 'transfer' ? (
+                      <p className="text-xs sm:text-sm text-gray-600">
+                        {getAccountName(transaction.from_account_id)} → {getAccountName(transaction.to_account_id)}
+                      </p>
+                    ) : (
+                      <p className="text-xs sm:text-sm text-gray-600">
+                        口座: {getAccountName(transaction.account_id)}
+                      </p>
+                    )}
+
+                    <p className="text-xs sm:text-sm text-gray-500">
+                      記入者: {transaction.users.name}
                     </p>
                   </div>
+
+                  <p className={`text-lg sm:text-2xl font-bold mt-3 ${
+                    transaction.type === 'income' ? 'text-green-600' :
+                    transaction.type === 'expense' ? 'text-red-600' :
+                    'text-blue-600'
+                  }`}>
+                    {transaction.type === 'income' ? '+' : transaction.type === 'expense' ? '-' : '±'}
+                    {formatCurrency(transaction.amount)}
+                  </p>
                 </div>
 
                 {transaction.receipt_image_url && (
-                  <div className="mt-3 mb-3">
-                    <p className="text-sm text-gray-600 mb-2">📎 領収書:</p>
-                    <Image
-                      src={transaction.receipt_image_url}
-                      alt="領収書"
-                      width={300}
-                      height={200}
-                      className="rounded border cursor-pointer hover:opacity-80"
-                      onClick={() => window.open(transaction.receipt_image_url!, '_blank')}
-                    />
+                  <div className="mt-3">
+                    <button
+                      onClick={() => toggleReceipt(transaction.id)}
+                      className="text-sm text-gray-600 hover:text-gray-800 mb-2 flex items-center gap-1"
+                    >
+                      <span>📎 領収書</span>
+                      <span className="text-xs">
+                        {expandedReceiptIds.has(transaction.id) ? '▲' : '▼'}
+                      </span>
+                    </button>
+                    {expandedReceiptIds.has(transaction.id) && (
+                      <Image
+                        src={transaction.receipt_image_url}
+                        alt="領収書"
+                        width={300}
+                        height={200}
+                        className="rounded border cursor-pointer hover:opacity-80"
+                        onClick={() => window.open(transaction.receipt_image_url!, '_blank')}
+                      />
+                    )}
                   </div>
                 )}
               </div>
