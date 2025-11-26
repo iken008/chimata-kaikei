@@ -247,36 +247,36 @@ export default function SettingsPage() {
             <div className="flex">
               <button
                 onClick={() => setActiveTab('fiscal')}
-                className={`flex-1 py-4 px-6 font-bold transition ${
+                className={`flex-1 py-3 sm:py-4 px-2 sm:px-6 font-bold text-xs sm:text-base transition ${
                   activeTab === 'fiscal'
                     ? 'bg-white text-indigo-600 border-b-2 border-indigo-600'
                     : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
                 }`}
               >
-                📅 年度管理
+                <span className="hidden sm:inline">📅 </span>年度管理
               </button>
               <button
                 onClick={() => setActiveTab('category')}
-                className={`flex-1 py-4 px-6 font-bold transition ${
+                className={`flex-1 py-3 sm:py-4 px-2 sm:px-6 font-bold text-xs sm:text-base transition ${
                   activeTab === 'category'
                     ? 'bg-white text-indigo-600 border-b-2 border-indigo-600'
                     : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
                 }`}
               >
-                🏷️ カテゴリー管理
+                <span className="hidden sm:inline">🏷️ </span>カテゴリー
               </button>
               <button
                 onClick={() => {
                   setActiveTab('data')
                   if (!storageUsage) fetchStorageUsage()
                 }}
-                className={`flex-1 py-4 px-6 font-bold transition ${
+                className={`flex-1 py-3 sm:py-4 px-2 sm:px-6 font-bold text-xs sm:text-base transition ${
                   activeTab === 'data'
                     ? 'bg-white text-indigo-600 border-b-2 border-indigo-600'
                     : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
                 }`}
               >
-                💾 データ管理
+                <span className="hidden sm:inline">💾 </span>データ
               </button>
             </div>
           </div>
@@ -358,11 +358,11 @@ export default function SettingsPage() {
                 {/* 新しいカテゴリーを追加 */}
                 <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
                   <h3 className="font-bold mb-3 text-gray-800">新しいカテゴリーを追加</h3>
-                  <div className="flex gap-3">
+                  <div className="flex flex-col sm:flex-row gap-3">
                     <select
                       value={newCategoryType}
                       onChange={(e) => setNewCategoryType(e.target.value as 'income' | 'expense')}
-                      className="p-2 border border-gray-300 rounded"
+                      className="w-full sm:w-auto p-2 border border-gray-300 rounded"
                     >
                       <option value="income">収入</option>
                       <option value="expense">支出</option>
@@ -376,7 +376,7 @@ export default function SettingsPage() {
                     />
                     <button
                       onClick={handleAddCategory}
-                      className="px-4 py-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded font-bold"
+                      className="w-full sm:w-auto px-4 py-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded font-bold"
                     >
                       追加
                     </button>
@@ -1142,11 +1142,11 @@ function DataManagementView({
                   </p>
                 </div>
 
-                <div className="flex gap-2">
+                <div className="flex flex-col sm:flex-row gap-2">
                   <button
                     onClick={() => handleArchiveFiscalYear(fy.id, fy.name)}
                     disabled={archiving === fy.id}
-                    className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded font-bold text-sm disabled:bg-gray-400"
+                    className="w-full sm:w-auto px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded font-bold text-sm disabled:bg-gray-400"
                   >
                     {archiving === fy.id ? '処理中...' : '📦 アーカイブ'}
                   </button>
@@ -1155,7 +1155,7 @@ function DataManagementView({
                     <button
                       onClick={() => handleDeleteFiscalYearData(fy.id, fy.name)}
                       disabled={deleting === fy.id}
-                      className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded font-bold text-sm disabled:bg-gray-400"
+                      className="w-full sm:w-auto px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded font-bold text-sm disabled:bg-gray-400"
                     >
                       {deleting === fy.id ? '削除中...' : '🗑️ 完全削除'}
                     </button>
