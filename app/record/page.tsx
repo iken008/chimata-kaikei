@@ -204,7 +204,7 @@ export default function RecordPage() {
         amount: parseFloat(amount),
         description,
         category: type === 'transfer' ? null : category,
-        transaction_date: transactionDate,
+        recorded_at: transactionDate,
         recorded_by: userId,
         receipt_image_url: imageUrl,
         fiscal_year_id: currentFiscalYear?.id,

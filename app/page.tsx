@@ -83,14 +83,64 @@ export default function Home() {
     if (!currentFiscalYear) return
 
     try {
-      // 口座残高を取得
+      // 口座情報（名前のみ）を取得
       const { data: accountsData, error: accountsError } = await supabase
         .from('accounts')
-        .select('*')
+        .select('id, name')
         .order('id')
 
       if (accountsError) throw accountsError
-      setAccounts(accountsData || [])
+
+      // 当年度の全取引を取得して残高を計算
+      const { data: allTransactions, error: txError } = await supabase
+        .from('transactions')
+        .select('type, amount, account_id, from_account_id, to_account_id')
+        .eq('is_deleted', false)
+        .eq('fiscal_year_id', currentFiscalYear.id)
+
+      if (txError) throw txError
+
+      // 各口座の残高を計算（期首残高 + 取引合計）
+      const accountBalances = (accountsData || []).map(account => {
+        let balance = 0
+
+        // 期首残高を設定
+        if (account.id === 1) { // 現金
+          balance = typeof currentFiscalYear.starting_balance_cash === 'number'
+            ? currentFiscalYear.starting_balance_cash
+            : 0
+        } else if (account.id === 2) { // 銀行
+          balance = typeof currentFiscalYear.starting_balance_bank === 'number'
+            ? currentFiscalYear.starting_balance_bank
+            : 0
+        }
+
+        // 当年度の取引を集計
+        (allTransactions || []).forEach(tx => {
+          const amount = +tx.amount // 数値に変換
+
+          if (tx.type === 'income' && tx.account_id === account.id) {
+            balance += amount
+          } else if (tx.type === 'expense' && tx.account_id === account.id) {
+            balance -= amount
+          } else if (tx.type === 'transfer') {
+            if (tx.from_account_id === account.id) {
+              balance -= amount
+            }
+            if (tx.to_account_id === account.id) {
+              balance += amount
+            }
+          }
+        })
+
+        return {
+          id: account.id,
+          name: account.name,
+          balance: balance
+        }
+      })
+
+      setAccounts(accountBalances)
 
       // 最近の取引を取得（削除されていない、現在の年度のもの）
       const { data: transactionsData, error: transactionsError } = await supabase

@@ -967,10 +967,13 @@ function DataManagementView({
     setDeleting(fiscalYearId)
 
     try {
+      // 画像を削除
       const { data: transactions } = await supabase
         .from('transactions')
         .select('receipt_image_url')
         .eq('fiscal_year_id', fiscalYearId)
+
+      console.log('削除対象の取引数:', transactions?.length)
 
       const imageUrls = transactions
         ?.filter((t: any) => t.receipt_image_url)
@@ -980,10 +983,25 @@ function DataManagementView({
         })
         .filter(Boolean) || []
 
+      console.log('削除対象の画像ファイル:', imageUrls)
+
       if (imageUrls.length > 0) {
-        await supabase.storage
+        const { data: removeData, error: removeError } = await supabase.storage
           .from('receipts')
           .remove(imageUrls as string[])
+
+        if (removeError) {
+          console.error('画像削除エラー:', removeError)
+          alert(
+            `警告: 画像の削除中にエラーが発生しました。\n\n` +
+            `エラー: ${removeError.message}\n\n` +
+            `データは削除されますが、画像が残る可能性があります。`
+          )
+        } else {
+          console.log('画像削除成功:', removeData)
+        }
+      } else {
+        console.log('削除する画像はありません')
       }
 
       const { data: txIds } = await supabase

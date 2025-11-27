@@ -191,19 +191,29 @@ export default function LedgerPage() {
 
   const getMonthOptions = () => {
     const options = [{ value: 'all', label: '全期間' }]
-    const now = new Date()
-    
-    for (let i = 0; i < 12; i++) {
-      const date = new Date(now.getFullYear(), now.getMonth() - i, 1)
-      const year = date.getFullYear()
-      const month = date.getMonth() + 1
+
+    if (!currentFiscalYear) return options
+
+    // 年度の開始日と終了日を取得
+    const startDate = new Date(currentFiscalYear.start_date)
+    const endDate = new Date(currentFiscalYear.end_date)
+
+    // 年度内の全ての月を生成
+    const currentDate = new Date(startDate.getFullYear(), startDate.getMonth(), 1)
+    const lastDate = new Date(endDate.getFullYear(), endDate.getMonth(), 1)
+
+    while (currentDate <= lastDate) {
+      const year = currentDate.getFullYear()
+      const month = currentDate.getMonth() + 1
       options.push({
         value: `${year}-${String(month).padStart(2, '0')}`,
         label: `${year}年${month}月`
       })
+      currentDate.setMonth(currentDate.getMonth() + 1)
     }
-    
-    return options
+
+    // 新しい月が先頭に来るように逆順にする
+    return [options[0], ...options.slice(1).reverse()]
   }
 
   // 出納帳用フィルター

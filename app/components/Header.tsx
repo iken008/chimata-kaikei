@@ -33,8 +33,10 @@ export default function Header({
   const menuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    fetchCurrentBalance()
-  }, [])
+    if (currentFiscalYear) {
+      fetchCurrentBalance()
+    }
+  }, [currentFiscalYear])
 
   // メニュー外クリックで閉じる
   useEffect(() => {
@@ -51,16 +53,84 @@ export default function Header({
   }, [])
 
   const fetchCurrentBalance = async () => {
-    const { data } = await supabase
-      .from('accounts')
-      .select('id, balance')
-      .order('id')
+    if (!currentFiscalYear) return
 
-    if (data && data.length === 2) {
-      setCurrentBalance({
-        cash: Number(data[0].balance),
-        bank: Number(data[1].balance),
+    try {
+      console.log('🔍 fetchCurrentBalance: currentFiscalYear =', currentFiscalYear)
+      console.log('🔍 starting_balance_cash =', currentFiscalYear.starting_balance_cash)
+      console.log('🔍 starting_balance_bank =', currentFiscalYear.starting_balance_bank)
+
+      // 口座情報を取得
+      const { data: accountsData, error: accountsError } = await supabase
+        .from('accounts')
+        .select('id, name')
+        .order('id')
+
+      if (accountsError) throw accountsError
+
+      // 当年度の全取引を取得して残高を計算
+      const { data: allTransactions, error: txError } = await supabase
+        .from('transactions')
+        .select('type, amount, account_id, from_account_id, to_account_id')
+        .eq('is_deleted', false)
+        .eq('fiscal_year_id', currentFiscalYear.id)
+
+      if (txError) throw txError
+
+      // 各口座の残高を計算（期首残高 + 取引合計）
+      const cashStart = currentFiscalYear.starting_balance_cash
+      const bankStart = currentFiscalYear.starting_balance_bank
+      console.log('🔍 cashStart =', cashStart, 'typeof =', typeof cashStart)
+      console.log('🔍 bankStart =', bankStart, 'typeof =', typeof bankStart)
+
+      let cashBalance = 0
+      let bankBalance = 0
+
+      if (typeof cashStart === 'number') {
+        cashBalance = cashStart
+      }
+      if (typeof bankStart === 'number') {
+        bankBalance = bankStart
+      }
+
+      (allTransactions || []).forEach(tx => {
+        const amount = +tx.amount // 数値に変換
+
+        // 現金（口座ID = 1）
+        if (tx.type === 'income' && tx.account_id === 1) {
+          cashBalance += amount
+        } else if (tx.type === 'expense' && tx.account_id === 1) {
+          cashBalance -= amount
+        } else if (tx.type === 'transfer') {
+          if (tx.from_account_id === 1) {
+            cashBalance -= amount
+          }
+          if (tx.to_account_id === 1) {
+            cashBalance += amount
+          }
+        }
+
+        // 銀行（口座ID = 2）
+        if (tx.type === 'income' && tx.account_id === 2) {
+          bankBalance += amount
+        } else if (tx.type === 'expense' && tx.account_id === 2) {
+          bankBalance -= amount
+        } else if (tx.type === 'transfer') {
+          if (tx.from_account_id === 2) {
+            bankBalance -= amount
+          }
+          if (tx.to_account_id === 2) {
+            bankBalance += amount
+          }
+        }
       })
+
+      setCurrentBalance({
+        cash: cashBalance,
+        bank: bankBalance,
+      })
+    } catch (error) {
+      console.error('Error fetching current balance:', error)
     }
   }
 
