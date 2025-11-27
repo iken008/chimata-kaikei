@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useFiscalYear } from '../contexts/FiscalYearContext'
+import { useAuth } from '../contexts/AuthContext'
 import Header from '../components/Header'
 import JSZip from 'jszip'
 import ProtectedRoute from '../components/ProtectedRoute'
@@ -35,6 +36,7 @@ type StorageUsage = {
 
 export default function SettingsPage() {
   const router = useRouter()
+  const { userProfile } = useAuth()
   const { allFiscalYears, currentFiscalYear, refreshFiscalYears } = useFiscalYear()
   const [activeTab, setActiveTab] = useState<SettingsTab>('fiscal')
   const [categories, setCategories] = useState<Category[]>([])
@@ -46,19 +48,24 @@ export default function SettingsPage() {
   const [loadingUsage, setLoadingUsage] = useState(false)
 
   useEffect(() => {
-    fetchCategories()
-  }, [])
-
-  useEffect(() => {
-    if (activeTab === 'category') {
+    if (currentFiscalYear) {
       fetchCategories()
     }
-  }, [activeTab])
+  }, [currentFiscalYear])
+
+  useEffect(() => {
+    if (activeTab === 'category' && currentFiscalYear) {
+      fetchCategories()
+    }
+  }, [activeTab, currentFiscalYear])
 
   const fetchCategories = async () => {
+    if (!currentFiscalYear) return
+
     const { data, error } = await supabase
       .from('categories')
       .select('*')
+      .eq('fiscal_year_id', currentFiscalYear.id)
       .order('type')
       .order('sort_order')
 
@@ -124,7 +131,16 @@ export default function SettingsPage() {
     cashBalance: number,
     bankBalance: number
   ) => {
+    if (!userProfile) return
+
     try {
+      // 変更前のデータを取得
+      const { data: oldData } = await supabase
+        .from('fiscal_years')
+        .select('*')
+        .eq('id', fiscalYearId)
+        .single()
+
       const { error } = await supabase
         .from('fiscal_years')
         .update({
@@ -137,6 +153,25 @@ export default function SettingsPage() {
         .eq('id', fiscalYearId)
 
       if (error) throw error
+
+      // システム履歴に記録
+      await supabase.from('system_history').insert({
+        action_type: 'year_edited',
+        target_type: 'fiscal_year',
+        target_id: String(fiscalYearId),
+        performed_by: userProfile.id,
+        details: {
+          old_data: oldData,
+          new_data: {
+            name,
+            start_date: startDate,
+            end_date: endDate,
+            starting_balance_cash: cashBalance,
+            starting_balance_bank: bankBalance,
+          },
+        },
+        description: `年度「${name}」を編集しました`,
+      })
 
       alert('年度情報を更新しました')
       await refreshFiscalYears()
@@ -153,25 +188,50 @@ export default function SettingsPage() {
       return
     }
 
+    if (!userProfile) return
+    if (!currentFiscalYear) return
+
     try {
       const { data: maxData } = await supabase
         .from('categories')
         .select('sort_order')
         .eq('type', newCategoryType)
+        .eq('fiscal_year_id', currentFiscalYear.id)
         .order('sort_order', { ascending: false })
         .limit(1)
 
       const maxOrder = maxData?.[0]?.sort_order || 0
 
-      const { error } = await supabase
+      const { data: newCategory, error } = await supabase
         .from('categories')
         .insert({
           name: newCategoryName,
           type: newCategoryType,
           sort_order: maxOrder + 1,
+          fiscal_year_id: currentFiscalYear.id,
         })
+        .select()
+        .single()
 
       if (error) throw error
+
+      // システム履歴に記録
+      if (newCategory && currentFiscalYear) {
+        await supabase.from('system_history').insert({
+          action_type: 'category_added',
+          target_type: 'category',
+          target_id: String(newCategory.id),
+          performed_by: userProfile.id,
+          details: {
+            category_name: newCategoryName,
+            category_type: newCategoryType,
+            sort_order: maxOrder + 1,
+            fiscal_year_id: currentFiscalYear.id,
+            fiscal_year_name: currentFiscalYear.name,
+          },
+          description: `【${currentFiscalYear.name}】${newCategoryType === 'income' ? '収入' : '支出'}カテゴリー「${newCategoryName}」を追加しました`,
+        })
+      }
 
       alert('カテゴリーを追加しました')
       setNewCategoryName('')
@@ -188,13 +248,41 @@ export default function SettingsPage() {
       return
     }
 
+    if (!userProfile) return
+    if (!currentFiscalYear) return
+
     try {
+      // 変更前のデータを取得
+      const { data: oldCategory } = await supabase
+        .from('categories')
+        .select('*')
+        .eq('id', categoryId)
+        .single()
+
       const { error } = await supabase
         .from('categories')
         .update({ name: newName })
         .eq('id', categoryId)
 
       if (error) throw error
+
+      // システム履歴に記録
+      if (oldCategory && currentFiscalYear) {
+        await supabase.from('system_history').insert({
+          action_type: 'category_edited',
+          target_type: 'category',
+          target_id: String(categoryId),
+          performed_by: userProfile.id,
+          details: {
+            old_name: oldCategory.name,
+            new_name: newName,
+            category_type: oldCategory.type,
+            fiscal_year_id: currentFiscalYear.id,
+            fiscal_year_name: currentFiscalYear.name,
+          },
+          description: `【${currentFiscalYear.name}】${oldCategory.type === 'income' ? '収入' : '支出'}カテゴリー「${oldCategory.name}」を「${newName}」に変更しました`,
+        })
+      }
 
       alert('カテゴリー名を更新しました')
       setEditingCategory(null)
@@ -206,11 +294,43 @@ export default function SettingsPage() {
   }
 
   const handleDeleteCategory = async (categoryId: number, categoryName: string) => {
-    if (!confirm(`「${categoryName}」を削除しますか？`)) {
-      return
-    }
+    if (!userProfile) return
+    if (!currentFiscalYear) return
 
     try {
+      // このカテゴリーを使用している取引数を確認
+      const { count: transactionCount, error: countError } = await supabase
+        .from('transactions')
+        .select('*', { count: 'exact', head: true })
+        .eq('category', categoryName)
+        .eq('fiscal_year_id', currentFiscalYear.id)
+
+      if (countError) throw countError
+
+      // 使用中の場合は警告を表示
+      let confirmMessage = ''
+      if (transactionCount && transactionCount > 0) {
+        confirmMessage =
+          `⚠️ 警告: このカテゴリーは現在使用中です\n\n` +
+          `カテゴリー名: ${categoryName}\n` +
+          `使用件数: ${transactionCount}件の取引\n\n` +
+          `このカテゴリーを削除すると、これらの取引のカテゴリー情報が失われます。\n` +
+          `本当に削除しますか？`
+      } else {
+        confirmMessage = `カテゴリー「${categoryName}」を削除しますか？\n\n（このカテゴリーは現在使用されていません）`
+      }
+
+      if (!confirm(confirmMessage)) {
+        return
+      }
+
+      // 削除前にカテゴリー情報を取得
+      const { data: category } = await supabase
+        .from('categories')
+        .select('*')
+        .eq('id', categoryId)
+        .single()
+
       const { error } = await supabase
         .from('categories')
         .delete()
@@ -218,7 +338,30 @@ export default function SettingsPage() {
 
       if (error) throw error
 
-      alert('カテゴリーを削除しました')
+      // システム履歴に記録
+      if (category && currentFiscalYear) {
+        await supabase.from('system_history').insert({
+          action_type: 'category_deleted',
+          target_type: 'category',
+          target_id: String(categoryId),
+          performed_by: userProfile.id,
+          details: {
+            category_name: categoryName,
+            category_type: category.type,
+            sort_order: category.sort_order,
+            transaction_count: transactionCount || 0,
+            fiscal_year_id: currentFiscalYear.id,
+            fiscal_year_name: currentFiscalYear.name,
+          },
+          description: `【${currentFiscalYear.name}】${category.type === 'income' ? '収入' : '支出'}カテゴリー「${categoryName}」を削除しました（${transactionCount || 0}件の取引で使用中）`,
+        })
+      }
+
+      const successMessage = transactionCount && transactionCount > 0
+        ? `カテゴリーを削除しました。\n\n注意: ${transactionCount}件の取引でこのカテゴリーが使用されていました。`
+        : 'カテゴリーを削除しました'
+
+      alert(successMessage)
       await fetchCategories()
     } catch (error) {
       console.error('Error deleting category:', error)
@@ -433,6 +576,7 @@ export default function SettingsPage() {
                 allFiscalYears={allFiscalYears}
                 currentFiscalYear={currentFiscalYear}
                 onDeleteSuccess={refreshFiscalYears}
+                userProfile={userProfile}
               />
             )}
           </div>
@@ -598,6 +742,7 @@ function DataManagementView({
   allFiscalYears,
   currentFiscalYear,
   onDeleteSuccess,
+  userProfile,
 }: {
   storageUsage: StorageUsage | null
   loadingUsage: boolean
@@ -605,6 +750,7 @@ function DataManagementView({
   allFiscalYears: any[]
   currentFiscalYear: any
   onDeleteSuccess: () => void
+  userProfile: any
 }) {
   const [archiving, setArchiving] = useState<number | null>(null)
   const [deleting, setDeleting] = useState<number | null>(null)
@@ -890,6 +1036,27 @@ function DataManagementView({
         zipLink.click()
         document.body.removeChild(zipLink)
 
+        // システム履歴に記録
+        if (userProfile) {
+          await supabase.from('system_history').insert({
+            action_type: 'archive_created',
+            target_type: 'fiscal_year',
+            target_id: String(fiscalYearId),
+            performed_by: userProfile.id,
+            details: {
+              fiscal_year_name: fiscalYearName,
+              transaction_count: transactions.length,
+              receipt_count: successCount,
+              failed_receipts: failCount,
+              total_income: totalIncome,
+              total_expense: totalExpense,
+              starting_balance: startingBalance,
+              ending_balance: endingBalance,
+            },
+            description: `年度「${fiscalYearName}」のアーカイブを作成しました（取引${transactions.length}件、領収書${successCount}枚）`,
+          })
+        }
+
         if (failCount > 0) {
           alert(
             `アーカイブが完了しました！\n\n` +
@@ -917,7 +1084,7 @@ function DataManagementView({
         }
       } else {
         const zipBlob = await zip.generateAsync({ type: 'blob' })
-        
+
         const zipLink = document.createElement('a')
         const zipUrl = URL.createObjectURL(zipBlob)
         zipLink.setAttribute('href', zipUrl)
@@ -926,6 +1093,26 @@ function DataManagementView({
         document.body.appendChild(zipLink)
         zipLink.click()
         document.body.removeChild(zipLink)
+
+        // システム履歴に記録
+        if (userProfile) {
+          await supabase.from('system_history').insert({
+            action_type: 'archive_created',
+            target_type: 'fiscal_year',
+            target_id: String(fiscalYearId),
+            performed_by: userProfile.id,
+            details: {
+              fiscal_year_name: fiscalYearName,
+              transaction_count: transactions.length,
+              receipt_count: 0,
+              total_income: totalIncome,
+              total_expense: totalExpense,
+              starting_balance: startingBalance,
+              ending_balance: endingBalance,
+            },
+            description: `年度「${fiscalYearName}」のアーカイブを作成しました（取引${transactions.length}件、領収書なし）`,
+          })
+        }
 
         alert(
           `アーカイブが完了しました！\n\n` +
@@ -985,6 +1172,9 @@ function DataManagementView({
 
       console.log('削除対象の画像ファイル:', imageUrls)
 
+      const transactionCount = transactions?.length || 0
+      const imageCount = imageUrls.length
+
       if (imageUrls.length > 0) {
         const { data: removeData, error: removeError } = await supabase.storage
           .from('receipts')
@@ -1010,6 +1200,7 @@ function DataManagementView({
         .eq('fiscal_year_id', fiscalYearId)
 
       const ids = txIds?.map(t => t.id) || []
+      const historyCount = ids.length
 
       if (ids.length > 0) {
         await supabase
@@ -1027,6 +1218,23 @@ function DataManagementView({
         .from('fiscal_years')
         .delete()
         .eq('id', fiscalYearId)
+
+      // システム履歴に記録
+      if (userProfile) {
+        await supabase.from('system_history').insert({
+          action_type: 'year_deleted',
+          target_type: 'fiscal_year',
+          target_id: String(fiscalYearId),
+          performed_by: userProfile.id,
+          details: {
+            fiscal_year_name: fiscalYearName,
+            deleted_transaction_count: transactionCount,
+            deleted_history_count: historyCount,
+            deleted_image_count: imageCount,
+          },
+          description: `年度「${fiscalYearName}」のデータを完全削除しました（取引${transactionCount}件、履歴${historyCount}件、領収書${imageCount}枚）`,
+        })
+      }
 
       alert('データを削除しました')
       onDeleteSuccess()

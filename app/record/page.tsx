@@ -10,32 +10,21 @@ import Header from '../components/Header'
 import Image from 'next/image'
 import imageCompression from 'browser-image-compression'
 
-// カテゴリー定義
-const INCOME_CATEGORIES = [
-  '会費',
-  '寄付',
-  '助成金',
-  'イベント収入',
-  'その他収入',
-]
-
-const EXPENSE_CATEGORIES = [
-  '交通費',
-  '食費',
-  '備品購入',
-  '会場費',
-  '印刷費',
-  '通信費',
-  'イベント費用',
-  'その他支出',
-]
+type Category = {
+  id: number
+  name: string
+  type: 'income' | 'expense'
+  sort_order: number
+}
 
 export default function RecordPage() {
   const router = useRouter()
   const { currentFiscalYear } = useFiscalYear()
   const { userProfile } = useAuth()
-  
+
   const [type, setType] = useState<'income' | 'expense' | 'transfer'>('expense')
+  const [incomeCategories, setIncomeCategories] = useState<Category[]>([])
+  const [expenseCategories, setExpenseCategories] = useState<Category[]>([])
   const [amount, setAmount] = useState('')
   const [description, setDescription] = useState('')
   const [category, setCategory] = useState('')
@@ -48,6 +37,13 @@ export default function RecordPage() {
   const [loading, setLoading] = useState(false)
   const [receiptImage, setReceiptImage] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+
+  // カテゴリーを取得
+  useEffect(() => {
+    if (currentFiscalYear) {
+      fetchCategories()
+    }
+  }, [currentFiscalYear])
 
   // 年度が変更されたら日付を自動設定
   useEffect(() => {
@@ -64,6 +60,27 @@ export default function RecordPage() {
       }
     }
   }, [currentFiscalYear])
+
+  const fetchCategories = async () => {
+    if (!currentFiscalYear) return
+
+    const { data, error } = await supabase
+      .from('categories')
+      .select('*')
+      .eq('fiscal_year_id', currentFiscalYear.id)
+      .order('sort_order')
+
+    if (error) {
+      console.error('Error fetching categories:', error)
+      return
+    }
+
+    const income = data?.filter(c => c.type === 'income') || []
+    const expense = data?.filter(c => c.type === 'expense') || []
+
+    setIncomeCategories(income)
+    setExpenseCategories(expense)
+  }
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -265,7 +282,9 @@ export default function RecordPage() {
     }
   }
 
-  const currentCategories = type === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES
+  const currentCategories = type === 'income'
+    ? incomeCategories.map(c => c.name)
+    : expenseCategories.map(c => c.name)
 
   return (
     <ProtectedRoute>

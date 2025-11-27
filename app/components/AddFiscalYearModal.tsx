@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { useAuth } from '../contexts/AuthContext'
+import { useFiscalYear } from '../contexts/FiscalYearContext'
 
 type AddFiscalYearModalProps = {
   isOpen: boolean
@@ -16,12 +18,15 @@ export default function AddFiscalYearModal({
   onSuccess,
   currentBalance,
 }: AddFiscalYearModalProps) {
+  const { userProfile } = useAuth()
+  const { currentFiscalYear } = useFiscalYear()
   const [name, setName] = useState('')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [useCurrentBalance, setUseCurrentBalance] = useState(true)
   const [cashBalance, setCashBalance] = useState('0')
   const [bankBalance, setBankBalance] = useState('0')
+  const [copyCategories, setCopyCategories] = useState(true)
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
@@ -55,13 +60,69 @@ export default function AddFiscalYearModal({
         is_current: false,
       }
 
-      const { error } = await supabase
+      const { data: newFiscalYear, error } = await supabase
         .from('fiscal_years')
         .insert(fiscalYearData)
+        .select()
+        .single()
 
       if (error) throw error
 
-      alert('新しい年度を作成しました！')
+      // カテゴリーをコピー
+      let copiedCategoriesCount = 0
+      if (copyCategories && currentFiscalYear) {
+        const { data: existingCategories } = await supabase
+          .from('categories')
+          .select('*')
+          .eq('fiscal_year_id', currentFiscalYear.id)
+          .order('sort_order')
+
+        if (existingCategories && existingCategories.length > 0) {
+          const newCategories = existingCategories.map(cat => ({
+            name: cat.name,
+            type: cat.type,
+            sort_order: cat.sort_order,
+            fiscal_year_id: newFiscalYear.id,
+          }))
+
+          const { error: categoriesError } = await supabase
+            .from('categories')
+            .insert(newCategories)
+
+          if (!categoriesError) {
+            copiedCategoriesCount = newCategories.length
+          } else {
+            console.error('Error copying categories:', categoriesError)
+          }
+        }
+      }
+
+      // システム履歴に記録
+      if (userProfile && newFiscalYear) {
+        await supabase.from('system_history').insert({
+          action_type: 'year_created',
+          target_type: 'fiscal_year',
+          target_id: String(newFiscalYear.id),
+          performed_by: userProfile.id,
+          details: {
+            fiscal_year_name: name,
+            start_date: startDate,
+            end_date: endDate,
+            starting_balance_cash: fiscalYearData.starting_balance_cash,
+            starting_balance_bank: fiscalYearData.starting_balance_bank,
+            used_current_balance: useCurrentBalance,
+            copied_categories: copyCategories,
+            copied_categories_count: copiedCategoriesCount,
+          },
+          description: `年度「${name}」を作成しました（${startDate} 〜 ${endDate}）${copyCategories ? `、カテゴリー${copiedCategoriesCount}件をコピー` : ''}`,
+        })
+      }
+
+      const successMessage = copyCategories && copiedCategoriesCount > 0
+        ? `新しい年度を作成しました！\n\nカテゴリー${copiedCategoriesCount}件を前年度からコピーしました。`
+        : '新しい年度を作成しました！'
+
+      alert(successMessage)
       onSuccess()
       onClose()
     } catch (error) {
@@ -151,6 +212,24 @@ export default function AddFiscalYearModal({
                 className="w-full p-3 border border-gray-300 rounded-lg"
                 required
               />
+            </div>
+
+            {/* カテゴリーコピー設定 */}
+            <div className="mb-4 p-4 bg-green-50 rounded-lg border border-green-200">
+              <label className="flex items-center">
+                <input
+                  type="checkbox"
+                  checked={copyCategories}
+                  onChange={(e) => setCopyCategories(e.target.checked)}
+                  className="mr-2 w-4 h-4"
+                />
+                <span className="font-semibold text-gray-800">
+                  前年度のカテゴリーをコピーする
+                </span>
+              </label>
+              <p className="text-xs text-gray-600 mt-2 ml-6">
+                チェックすると、現在の年度のカテゴリーが新年度にコピーされます。
+              </p>
             </div>
 
             {/* 繰越金設定 */}
