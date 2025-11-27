@@ -623,6 +623,9 @@ function renderSystemHistoryDetails(record: any) {
   if (record.action_type === 'category_added') {
     return (
       <div className="space-y-1">
+        {details.fiscal_year_name && (
+          <p><span className="font-semibold">年度:</span> {details.fiscal_year_name}</p>
+        )}
         <p><span className="font-semibold">カテゴリー名:</span> {details.category_name}</p>
         <p><span className="font-semibold">種類:</span> {details.category_type === 'income' ? '収入' : '支出'}</p>
       </div>
@@ -632,6 +635,9 @@ function renderSystemHistoryDetails(record: any) {
   if (record.action_type === 'category_edited') {
     return (
       <div className="space-y-1">
+        {details.fiscal_year_name && (
+          <p><span className="font-semibold">年度:</span> {details.fiscal_year_name}</p>
+        )}
         <p><span className="font-semibold">種類:</span> {details.category_type === 'income' ? '収入' : '支出'}</p>
         <p><span className="font-semibold text-red-600">変更前:</span> {details.old_name}</p>
         <p><span className="font-semibold text-green-600">変更後:</span> {details.new_name}</p>
@@ -642,8 +648,17 @@ function renderSystemHistoryDetails(record: any) {
   if (record.action_type === 'category_deleted') {
     return (
       <div className="space-y-1">
+        {details.fiscal_year_name && (
+          <p><span className="font-semibold">年度:</span> {details.fiscal_year_name}</p>
+        )}
         <p><span className="font-semibold">カテゴリー名:</span> {details.category_name}</p>
         <p><span className="font-semibold">種類:</span> {details.category_type === 'income' ? '収入' : '支出'}</p>
+        {details.transaction_count !== undefined && (
+          <p className={details.transaction_count > 0 ? 'text-orange-600' : 'text-gray-600'}>
+            <span className="font-semibold">使用件数:</span> {details.transaction_count}件の取引
+            {details.transaction_count > 0 && ' ⚠️'}
+          </p>
+        )}
       </div>
     )
   }

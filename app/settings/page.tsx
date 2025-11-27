@@ -48,19 +48,24 @@ export default function SettingsPage() {
   const [loadingUsage, setLoadingUsage] = useState(false)
 
   useEffect(() => {
-    fetchCategories()
-  }, [])
-
-  useEffect(() => {
-    if (activeTab === 'category') {
+    if (currentFiscalYear) {
       fetchCategories()
     }
-  }, [activeTab])
+  }, [currentFiscalYear])
+
+  useEffect(() => {
+    if (activeTab === 'category' && currentFiscalYear) {
+      fetchCategories()
+    }
+  }, [activeTab, currentFiscalYear])
 
   const fetchCategories = async () => {
+    if (!currentFiscalYear) return
+
     const { data, error } = await supabase
       .from('categories')
       .select('*')
+      .eq('fiscal_year_id', currentFiscalYear.id)
       .order('type')
       .order('sort_order')
 
@@ -190,6 +195,7 @@ export default function SettingsPage() {
         .from('categories')
         .select('sort_order')
         .eq('type', newCategoryType)
+        .eq('fiscal_year_id', currentFiscalYear.id)
         .order('sort_order', { ascending: false })
         .limit(1)
 
@@ -201,6 +207,7 @@ export default function SettingsPage() {
           name: newCategoryName,
           type: newCategoryType,
           sort_order: maxOrder + 1,
+          fiscal_year_id: currentFiscalYear.id,
         })
         .select()
         .single()
@@ -208,7 +215,7 @@ export default function SettingsPage() {
       if (error) throw error
 
       // システム履歴に記録
-      if (newCategory) {
+      if (newCategory && currentFiscalYear) {
         await supabase.from('system_history').insert({
           action_type: 'category_added',
           target_type: 'category',
@@ -218,8 +225,10 @@ export default function SettingsPage() {
             category_name: newCategoryName,
             category_type: newCategoryType,
             sort_order: maxOrder + 1,
+            fiscal_year_id: currentFiscalYear.id,
+            fiscal_year_name: currentFiscalYear.name,
           },
-          description: `${newCategoryType === 'income' ? '収入' : '支出'}カテゴリー「${newCategoryName}」を追加しました`,
+          description: `【${currentFiscalYear.name}】${newCategoryType === 'income' ? '収入' : '支出'}カテゴリー「${newCategoryName}」を追加しました`,
         })
       }
 
@@ -256,7 +265,7 @@ export default function SettingsPage() {
       if (error) throw error
 
       // システム履歴に記録
-      if (oldCategory) {
+      if (oldCategory && currentFiscalYear) {
         await supabase.from('system_history').insert({
           action_type: 'category_edited',
           target_type: 'category',
@@ -266,8 +275,10 @@ export default function SettingsPage() {
             old_name: oldCategory.name,
             new_name: newName,
             category_type: oldCategory.type,
+            fiscal_year_id: currentFiscalYear.id,
+            fiscal_year_name: currentFiscalYear.name,
           },
-          description: `${oldCategory.type === 'income' ? '収入' : '支出'}カテゴリー「${oldCategory.name}」を「${newName}」に変更しました`,
+          description: `【${currentFiscalYear.name}】${oldCategory.type === 'income' ? '収入' : '支出'}カテゴリー「${oldCategory.name}」を「${newName}」に変更しました`,
         })
       }
 
@@ -281,13 +292,35 @@ export default function SettingsPage() {
   }
 
   const handleDeleteCategory = async (categoryId: number, categoryName: string) => {
-    if (!confirm(`「${categoryName}」を削除しますか？`)) {
-      return
-    }
-
     if (!userProfile) return
 
     try {
+      // このカテゴリーを使用している取引数を確認
+      const { count: transactionCount, error: countError } = await supabase
+        .from('transactions')
+        .select('*', { count: 'exact', head: true })
+        .eq('category', categoryName)
+        .eq('fiscal_year_id', currentFiscalYear.id)
+
+      if (countError) throw countError
+
+      // 使用中の場合は警告を表示
+      let confirmMessage = ''
+      if (transactionCount && transactionCount > 0) {
+        confirmMessage =
+          `⚠️ 警告: このカテゴリーは現在使用中です\n\n` +
+          `カテゴリー名: ${categoryName}\n` +
+          `使用件数: ${transactionCount}件の取引\n\n` +
+          `このカテゴリーを削除すると、これらの取引のカテゴリー情報が失われます。\n` +
+          `本当に削除しますか？`
+      } else {
+        confirmMessage = `カテゴリー「${categoryName}」を削除しますか？\n\n（このカテゴリーは現在使用されていません）`
+      }
+
+      if (!confirm(confirmMessage)) {
+        return
+      }
+
       // 削除前にカテゴリー情報を取得
       const { data: category } = await supabase
         .from('categories')
@@ -303,7 +336,7 @@ export default function SettingsPage() {
       if (error) throw error
 
       // システム履歴に記録
-      if (category) {
+      if (category && currentFiscalYear) {
         await supabase.from('system_history').insert({
           action_type: 'category_deleted',
           target_type: 'category',
@@ -313,12 +346,19 @@ export default function SettingsPage() {
             category_name: categoryName,
             category_type: category.type,
             sort_order: category.sort_order,
+            transaction_count: transactionCount || 0,
+            fiscal_year_id: currentFiscalYear.id,
+            fiscal_year_name: currentFiscalYear.name,
           },
-          description: `${category.type === 'income' ? '収入' : '支出'}カテゴリー「${categoryName}」を削除しました`,
+          description: `【${currentFiscalYear.name}】${category.type === 'income' ? '収入' : '支出'}カテゴリー「${categoryName}」を削除しました（${transactionCount || 0}件の取引で使用中）`,
         })
       }
 
-      alert('カテゴリーを削除しました')
+      const successMessage = transactionCount && transactionCount > 0
+        ? `カテゴリーを削除しました。\n\n注意: ${transactionCount}件の取引でこのカテゴリーが使用されていました。`
+        : 'カテゴリーを削除しました'
+
+      alert(successMessage)
       await fetchCategories()
     } catch (error) {
       console.error('Error deleting category:', error)
