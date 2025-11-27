@@ -119,8 +119,22 @@ export default function MembersPage() {
 
   const copyCode = async (code: string) => {
     try {
-      await navigator.clipboard.writeText(code)
-      alert(`コード「${code}」をコピーしました！`)
+      // クリップボードAPIが利用可能かチェック
+      if (typeof window !== 'undefined' && navigator.clipboard) {
+        await navigator.clipboard.writeText(code)
+        alert(`コード「${code}」をコピーしました！`)
+      } else {
+        // フォールバック: 古い方法でコピー
+        const textArea = document.createElement('textarea')
+        textArea.value = code
+        textArea.style.position = 'fixed'
+        textArea.style.opacity = '0'
+        document.body.appendChild(textArea)
+        textArea.select()
+        document.execCommand('copy')
+        document.body.removeChild(textArea)
+        alert(`コード「${code}」をコピーしました！`)
+      }
     } catch (error) {
       console.error('Error copying:', error)
       alert('コピーに失敗しました')

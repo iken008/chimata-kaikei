@@ -137,6 +137,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   const signUp = async (email: string, password: string, name: string, inviteCodeId?: string) => {
+    console.log('🔍 signUp: 開始', { email, name, inviteCodeId })
+
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
@@ -147,11 +149,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         },
       },
     })
-    if (error) throw error
+    if (error) {
+      console.error('❌ signUp: auth.signUp失敗', error)
+      throw error
+    }
+
+    console.log('✅ signUp: auth.signUp成功', { userId: data.user?.id })
 
     // ユーザー登録成功後、usersテーブルにレコードを作成
     if (data.user) {
-      const { data: userData, error: insertError } = await supabase
+      console.log('🔍 signUp: usersテーブルにレコード作成開始')
+
+      let userData = null
+
+      const { data: insertData, error: insertError } = await supabase
         .from('users')
         .insert({
           auth_user_id: data.user.id,
@@ -162,12 +173,43 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .single()
 
       if (insertError) {
-        console.error('Error creating user profile:', insertError)
-        throw new Error('ユーザープロフィールの作成に失敗しました')
+        // 重複エラー（23505）の場合は、既存のレコードを取得
+        if (insertError.code === '23505') {
+          console.log('⚠️ signUp: usersレコードは既に存在（トリガーによる自動作成の可能性）、既存レコードを取得')
+
+          const { data: existingUser, error: fetchError } = await supabase
+            .from('users')
+            .select('id')
+            .eq('auth_user_id', data.user.id)
+            .single()
+
+          if (fetchError || !existingUser) {
+            console.error('❌ signUp: 既存ユーザーの取得失敗', fetchError)
+            throw new Error('ユーザープロフィールの取得に失敗しました')
+          }
+
+          userData = existingUser
+          console.log('✅ signUp: 既存usersレコード取得成功', { userDataId: userData.id })
+        } else {
+          // その他のエラー
+          console.error('❌ signUp: usersテーブル作成失敗', {
+            error: insertError,
+            message: insertError.message,
+            details: insertError.details,
+            hint: insertError.hint,
+            code: insertError.code,
+          })
+          throw new Error('ユーザープロフィールの作成に失敗しました: ' + insertError.message)
+        }
+      } else {
+        userData = insertData
+        console.log('✅ signUp: usersテーブル作成成功', { userDataId: userData?.id })
       }
 
       // 招待コードを使用済みにする
       if (inviteCodeId && userData) {
+        console.log('🔍 signUp: 招待コード更新開始', { inviteCodeId, userId: userData.id })
+
         const { error: updateError } = await supabase
           .from('invite_codes')
           .update({
@@ -178,9 +220,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           .eq('id', inviteCodeId)
 
         if (updateError) {
-          console.error('Error updating invite code:', updateError)
+          console.error('❌ signUp: 招待コード更新失敗', updateError)
           // 招待コードの更新失敗はエラーとしない（ユーザー登録は成功しているため）
+        } else {
+          console.log('✅ signUp: 招待コード更新成功')
         }
+      } else {
+        console.warn('⚠️ signUp: 招待コードIDまたはuserDataがありません', { inviteCodeId, userData })
       }
     }
   }
