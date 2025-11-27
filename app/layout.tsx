@@ -17,6 +17,24 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "ちまたの会計 mini",
   description: "透明性のある会計管理システム",
+  applicationName: "ちまたの会計 mini",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "ちまたの会計",
+  },
+  formatDetection: {
+    telephone: false,
+  },
+  icons: {
+    icon: [
+      { url: '/icon.svg', type: 'image/svg+xml' },
+    ],
+    apple: [
+      { url: '/apple-icon.svg', type: 'image/svg+xml' },
+    ],
+  },
+  manifest: "/manifest.json",
 };
 
 export default function RootLayout({
