@@ -1,6 +1,6 @@
 'use client'
 
-import React, { createContext, useContext, useEffect, useState } from 'react'
+import React, { createContext, useContext, useEffect, useState, useRef } from 'react'
 import { User } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
@@ -27,6 +27,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
   const [loading, setLoading] = useState(true)
   const router = useRouter()
+  const deletionAlertShown = useRef(false)
 
   useEffect(() => {
     console.log('🔍 AuthContext: useEffect 開始')
@@ -65,6 +66,43 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     return () => subscription.unsubscribe()
   }, [])
+
+  // ユーザー削除のリアルタイム監視
+  useEffect(() => {
+    if (!userProfile?.id) return
+
+    // 新しいユーザーに切り替わったらフラグをリセット
+    deletionAlertShown.current = false
+
+    const channel = supabase
+      .channel('user-deletion-watch')
+      .on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'users',
+          filter: `id=eq.${userProfile.id}`,
+        },
+        (payload) => {
+          // 既にアラートを表示済みの場合はスキップ
+          if (deletionAlertShown.current) return
+
+          // 念のため、削除されたレコードのIDが自分のIDと一致するか確認
+          const deletedUserId = payload.old?.id
+          if (deletedUserId && deletedUserId !== userProfile.id) return
+
+          deletionAlertShown.current = true
+          alert('このアカウントは削除されました。ログアウトします。')
+          signOut()
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [userProfile?.id])
 
   const fetchUserProfile = async (authUserId: string) => {
     console.log('🔍 fetchUserProfile 開始:', authUserId)
@@ -137,6 +175,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   const signUp = async (email: string, password: string, name: string, inviteCodeId?: string) => {
+    console.log('🔍 signUp: 開始', { email, name, inviteCodeId })
+
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
@@ -147,39 +187,45 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         },
       },
     })
-    if (error) throw error
+    if (error) {
+      console.error('❌ signUp: auth.signUp失敗', error)
+      throw error
+    }
 
-    // ユーザー登録成功後、usersテーブルにレコードを作成
+    console.log('✅ signUp: auth.signUp成功', { userId: data.user?.id })
+
+    // ユーザー登録成功後、データベーストリガーがusersレコードを自動作成
     if (data.user) {
-      const { data: userData, error: insertError } = await supabase
-        .from('users')
-        .insert({
-          auth_user_id: data.user.id,
-          email: email,
-          name: name,
-        })
-        .select('id')
-        .single()
+      console.log('✅ signUp: データベーストリガーがusersレコードを自動作成します')
 
-      if (insertError) {
-        console.error('Error creating user profile:', insertError)
-        throw new Error('ユーザープロフィールの作成に失敗しました')
-      }
+      // 招待コードを使用済みにする（API経由でService Role Key使用）
+      if (inviteCodeId) {
+        console.log('🔍 signUp: 招待コード更新開始（API経由）')
 
-      // 招待コードを使用済みにする
-      if (inviteCodeId && userData) {
-        const { error: updateError } = await supabase
-          .from('invite_codes')
-          .update({
-            is_used: true,
-            used_by: userData.id,
-            used_at: new Date().toISOString(),
+        // トリガーの実行を待つため少し待機
+        await new Promise(resolve => setTimeout(resolve, 1000))
+
+        try {
+          const response = await fetch('/api/invite-code/mark-used', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              inviteCodeId,
+              email,
+            }),
           })
-          .eq('id', inviteCodeId)
 
-        if (updateError) {
-          console.error('Error updating invite code:', updateError)
-          // 招待コードの更新失敗はエラーとしない（ユーザー登録は成功しているため）
+          const data = await response.json()
+
+          if (!response.ok) {
+            console.error('❌ signUp: 招待コード更新失敗', data.error)
+          } else {
+            console.log('✅ signUp: 招待コード更新成功')
+          }
+        } catch (error) {
+          console.error('❌ signUp: 招待コード更新APIエラー', error)
         }
       }
     }

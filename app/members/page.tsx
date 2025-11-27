@@ -39,6 +39,32 @@ export default function MembersPage() {
     fetchData()
   }, [])
 
+  // 新規ユーザー登録のリアルタイム監視
+  useEffect(() => {
+    const channel = supabase
+      .channel('new-user-watch')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'users',
+        },
+        (payload) => {
+          const newUser = payload.new as Member
+          alert(`新しいメンバーが登録されました！\n\n名前: ${newUser.name}\nメール: ${newUser.email}`)
+
+          // メンバー一覧を更新
+          fetchData()
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [])
+
   const fetchData = async () => {
     try {
       // メンバー取得
@@ -119,8 +145,22 @@ export default function MembersPage() {
 
   const copyCode = async (code: string) => {
     try {
-      await navigator.clipboard.writeText(code)
-      alert(`コード「${code}」をコピーしました！`)
+      // クリップボードAPIが利用可能かチェック
+      if (typeof window !== 'undefined' && navigator.clipboard) {
+        await navigator.clipboard.writeText(code)
+        alert(`コード「${code}」をコピーしました！`)
+      } else {
+        // フォールバック: 古い方法でコピー
+        const textArea = document.createElement('textarea')
+        textArea.value = code
+        textArea.style.position = 'fixed'
+        textArea.style.opacity = '0'
+        document.body.appendChild(textArea)
+        textArea.select()
+        document.execCommand('copy')
+        document.body.removeChild(textArea)
+        alert(`コード「${code}」をコピーしました！`)
+      }
     } catch (error) {
       console.error('Error copying:', error)
       alert('コピーに失敗しました')
@@ -255,12 +295,16 @@ export default function MembersPage() {
         console.error('Auth deletion error:', authError)
         // usersテーブルからは削除済みなので、警告のみ表示
         alert(`メンバーをデータベースから削除しましたが、認証ユーザーの削除に失敗しました。\n\n${authError.message}\n\nSupabase Dashboardから手動で削除してください。`)
-        fetchData()
+
+        // 一覧を再取得して更新
+        await fetchData()
         return
       }
 
       alert('メンバーを完全に削除しました')
-      fetchData()
+
+      // 一覧を再取得して更新
+      await fetchData()
     } catch (error: any) {
       console.error('Error deleting member:', error)
       alert(error.message || '削除に失敗しました')
