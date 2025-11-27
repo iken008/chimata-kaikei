@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { useAuth } from '../contexts/AuthContext'
 
 type AddFiscalYearModalProps = {
   isOpen: boolean
@@ -16,6 +17,7 @@ export default function AddFiscalYearModal({
   onSuccess,
   currentBalance,
 }: AddFiscalYearModalProps) {
+  const { userProfile } = useAuth()
   const [name, setName] = useState('')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
@@ -55,11 +57,32 @@ export default function AddFiscalYearModal({
         is_current: false,
       }
 
-      const { error } = await supabase
+      const { data: newFiscalYear, error } = await supabase
         .from('fiscal_years')
         .insert(fiscalYearData)
+        .select()
+        .single()
 
       if (error) throw error
+
+      // システム履歴に記録
+      if (userProfile && newFiscalYear) {
+        await supabase.from('system_history').insert({
+          action_type: 'year_created',
+          target_type: 'fiscal_year',
+          target_id: String(newFiscalYear.id),
+          performed_by: userProfile.id,
+          details: {
+            fiscal_year_name: name,
+            start_date: startDate,
+            end_date: endDate,
+            starting_balance_cash: fiscalYearData.starting_balance_cash,
+            starting_balance_bank: fiscalYearData.starting_balance_bank,
+            used_current_balance: useCurrentBalance,
+          },
+          description: `年度「${name}」を作成しました（${startDate} 〜 ${endDate}）`,
+        })
+      }
 
       alert('新しい年度を作成しました！')
       onSuccess()

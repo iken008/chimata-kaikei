@@ -296,9 +296,42 @@ export default function MembersPage() {
         // usersテーブルからは削除済みなので、警告のみ表示
         alert(`メンバーをデータベースから削除しましたが、認証ユーザーの削除に失敗しました。\n\n${authError.message}\n\nSupabase Dashboardから手動で削除してください。`)
 
+        // システム履歴に記録（部分的な成功）
+        if (userProfile) {
+          await supabase.from('system_history').insert({
+            action_type: 'member_deleted',
+            target_type: 'member',
+            target_id: member.id,
+            performed_by: userProfile.id,
+            details: {
+              member_name: member.name,
+              member_email: member.email,
+              auth_deletion_failed: true,
+              error_message: authError.message,
+            },
+            description: `メンバー「${member.name}」を削除しました（認証ユーザーの削除は失敗）`,
+          })
+        }
+
         // 一覧を再取得して更新
         await fetchData()
         return
+      }
+
+      // システム履歴に記録
+      if (userProfile) {
+        await supabase.from('system_history').insert({
+          action_type: 'member_deleted',
+          target_type: 'member',
+          target_id: member.id,
+          performed_by: userProfile.id,
+          details: {
+            member_name: member.name,
+            member_email: member.email,
+            auth_user_id: member.auth_user_id,
+          },
+          description: `メンバー「${member.name}」を完全に削除しました`,
+        })
       }
 
       alert('メンバーを完全に削除しました')

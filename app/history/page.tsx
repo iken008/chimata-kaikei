@@ -36,12 +36,14 @@ export default function HistoryPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [showDeleted, setShowDeleted] = useState(false)
   const [deletedTransactions, setDeletedTransactions] = useState<any[]>([])
+  const [activeTab, setActiveTab] = useState<'transaction' | 'system'>('transaction')
+  const [systemHistory, setSystemHistory] = useState<any[]>([])
 
   useEffect(() => {
     if (currentFiscalYear) {
       fetchData()
     }
-  }, [currentFiscalYear, showDeleted])
+  }, [currentFiscalYear, showDeleted, activeTab])
 
   const fetchData = async () => {
     if (!currentFiscalYear) return
@@ -62,41 +64,57 @@ export default function HistoryPage() {
 
       const ids = transactionIds?.map(t => t.id) || []
 
-      if (ids.length === 0) {
-        setHistory([])
-        setDeletedTransactions([])
-        setLoading(false)
-        return
-      }
-
-      // 履歴データを取得
-      const { data: historyData, error } = await supabase
-        .from('transaction_history')
-        .select(`
-          *,
-          users (name)
-        `)
-        .in('transaction_id', ids)
-        .order('changed_at', { ascending: false })
-
-      if (error) throw error
-      setHistory(historyData || [])
-
-      // 削除済み取引を取得（showDeletedがtrueの場合）
-      if (showDeleted) {
-        const { data: deletedData } = await supabase
-          .from('transactions')
+      // 取引履歴データを取得（取引がある場合のみ）
+      if (ids.length > 0) {
+        const { data: historyData, error } = await supabase
+          .from('transaction_history')
           .select(`
             *,
             users (name)
           `)
-          .eq('fiscal_year_id', currentFiscalYear.id)
-          .eq('is_deleted', true)
-          .order('deleted_at', { ascending: false })
+          .in('transaction_id', ids)
+          .order('changed_at', { ascending: false })
 
-        setDeletedTransactions(deletedData || [])
+        if (error) throw error
+        setHistory(historyData || [])
+
+        // 削除済み取引を取得（showDeletedがtrueの場合）
+        if (showDeleted) {
+          const { data: deletedData } = await supabase
+            .from('transactions')
+            .select(`
+              *,
+              users (name)
+            `)
+            .eq('fiscal_year_id', currentFiscalYear.id)
+            .eq('is_deleted', true)
+            .order('deleted_at', { ascending: false })
+
+          setDeletedTransactions(deletedData || [])
+        } else {
+          setDeletedTransactions([])
+        }
       } else {
+        // 取引がない場合は空にする
+        setHistory([])
         setDeletedTransactions([])
+      }
+
+      // システム履歴を取得（取引の有無に関係なく常に取得）
+      if (activeTab === 'system') {
+        const { data: systemHistoryData, error: systemError } = await supabase
+          .from('system_history')
+          .select(`
+            *,
+            users (name)
+          `)
+          .order('performed_at', { ascending: false })
+
+        if (systemError) {
+          console.error('Error fetching system history:', systemError)
+        } else {
+          setSystemHistory(systemHistoryData || [])
+        }
       }
     } catch (error) {
       console.error('Error fetching history:', error)
@@ -267,8 +285,36 @@ export default function HistoryPage() {
       />
 
       <main className="container mx-auto p-4 max-w-4xl">
-        {/* 削除済み表示トグル */}
-        <div className="bg-white rounded-xl shadow-md p-4 mb-4 border border-gray-100">
+        {/* タブ切り替え */}
+        <div className="bg-white rounded-t-xl shadow-md border-b border-gray-200 mb-0">
+          <div className="flex">
+            <button
+              onClick={() => setActiveTab('transaction')}
+              className={`flex-1 py-3 sm:py-4 px-2 sm:px-6 font-bold text-xs sm:text-base transition ${
+                activeTab === 'transaction'
+                  ? 'bg-white text-amber-600 border-b-2 border-amber-600'
+                  : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              <span className="hidden sm:inline">📋 </span>取引履歴
+            </button>
+            <button
+              onClick={() => setActiveTab('system')}
+              className={`flex-1 py-3 sm:py-4 px-2 sm:px-6 font-bold text-xs sm:text-base transition ${
+                activeTab === 'system'
+                  ? 'bg-white text-amber-600 border-b-2 border-amber-600'
+                  : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              <span className="hidden sm:inline">⚙️ </span>システム履歴
+            </button>
+          </div>
+        </div>
+
+        {activeTab === 'transaction' && (
+          <>
+            {/* 削除済み表示トグル */}
+            <div className="bg-white rounded-b-xl shadow-md p-4 mb-4 border border-gray-100 border-t-0">
           <label className="flex items-center cursor-pointer">
             <input
               type="checkbox"
@@ -391,8 +437,216 @@ export default function HistoryPage() {
             </div>
           )}
         </div>
+          </>
+        )}
+
+        {/* システム履歴タブ */}
+        {activeTab === 'system' && (
+          <div className="bg-white rounded-b-xl shadow-md p-6 border border-gray-100 border-t-0">
+            <div className="flex items-center mb-4">
+              <span className="text-2xl mr-2">⚙️</span>
+              <h2 className="text-xl font-bold text-gray-800">システム操作履歴</h2>
+            </div>
+
+            {systemHistory.length === 0 ? (
+              <p className="text-gray-500 text-center py-8">システム履歴がありません</p>
+            ) : (
+              <div className="space-y-3">
+                {systemHistory.map((record) => {
+                  const actionTypeLabel = getSystemActionLabel(record.action_type)
+                  const actionColor = getSystemActionColor(record.action_type)
+
+                  return (
+                    <div
+                      key={record.id}
+                      className="border rounded-lg p-4 hover:bg-gray-50 transition"
+                    >
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className={`text-xs font-semibold px-2 py-1 rounded ${actionColor}`}>
+                              {actionTypeLabel}
+                            </span>
+                            <span className="text-sm text-gray-500">
+                              {formatDateTime(record.performed_at)}
+                            </span>
+                            <span className="text-sm text-gray-600">
+                              by {record.users?.name || '不明'}
+                            </span>
+                          </div>
+
+                          <p className="text-gray-800 font-medium mb-2">
+                            {record.description}
+                          </p>
+
+                          {record.details && (
+                            <button
+                              onClick={() => setExpandedId(expandedId === record.id ? null : record.id)}
+                              className="text-sm text-blue-600 hover:text-blue-800"
+                            >
+                              {expandedId === record.id ? '▼ 詳細を隠す' : '▶ 詳細を見る'}
+                            </button>
+                          )}
+
+                          {expandedId === record.id && record.details && (
+                            <div className="mt-3 p-3 bg-gray-50 rounded border border-gray-200 text-sm">
+                              {renderSystemHistoryDetails(record)}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </main>
     </div>
     </ProtectedRoute>
   )
+}
+
+function getSystemActionLabel(actionType: string) {
+  switch (actionType) {
+    case 'archive_created': return 'アーカイブ作成'
+    case 'year_deleted': return '年度削除'
+    case 'year_edited': return '年度編集'
+    case 'year_created': return '年度作成'
+    case 'member_deleted': return 'メンバー削除'
+    case 'member_added': return 'メンバー追加'
+    case 'category_added': return 'カテゴリー追加'
+    case 'category_edited': return 'カテゴリー編集'
+    case 'category_deleted': return 'カテゴリー削除'
+    default: return actionType
+  }
+}
+
+function getSystemActionColor(actionType: string) {
+  switch (actionType) {
+    case 'archive_created': return 'bg-blue-100 text-blue-800'
+    case 'year_deleted': return 'bg-red-100 text-red-800'
+    case 'year_edited': return 'bg-yellow-100 text-yellow-800'
+    case 'year_created': return 'bg-green-100 text-green-800'
+    case 'member_deleted': return 'bg-red-100 text-red-800'
+    case 'member_added': return 'bg-green-100 text-green-800'
+    case 'category_added': return 'bg-green-100 text-green-800'
+    case 'category_edited': return 'bg-yellow-100 text-yellow-800'
+    case 'category_deleted': return 'bg-red-100 text-red-800'
+    default: return 'bg-gray-100 text-gray-800'
+  }
+}
+
+function renderSystemHistoryDetails(record: any) {
+  const details = record.details
+
+  if (record.action_type === 'archive_created') {
+    return (
+      <div className="space-y-1">
+        <p><span className="font-semibold">年度名:</span> {details.fiscal_year_name}</p>
+        <p><span className="font-semibold">取引件数:</span> {details.transaction_count}件</p>
+        <p><span className="font-semibold">領収書:</span> {details.receipt_count}枚</p>
+        {details.failed_receipts > 0 && (
+          <p className="text-red-600"><span className="font-semibold">失敗:</span> {details.failed_receipts}枚</p>
+        )}
+        <p><span className="font-semibold">収入合計:</span> ¥{details.total_income?.toLocaleString()}</p>
+        <p><span className="font-semibold">支出合計:</span> ¥{details.total_expense?.toLocaleString()}</p>
+        <p><span className="font-semibold">期首残高:</span> ¥{details.starting_balance?.toLocaleString()}</p>
+        <p><span className="font-semibold">期末残高:</span> ¥{details.ending_balance?.toLocaleString()}</p>
+      </div>
+    )
+  }
+
+  if (record.action_type === 'year_deleted') {
+    return (
+      <div className="space-y-1">
+        <p><span className="font-semibold">年度名:</span> {details.fiscal_year_name}</p>
+        <p><span className="font-semibold">削除された取引:</span> {details.deleted_transaction_count}件</p>
+        <p><span className="font-semibold">削除された履歴:</span> {details.deleted_history_count}件</p>
+        <p><span className="font-semibold">削除された領収書:</span> {details.deleted_image_count}枚</p>
+      </div>
+    )
+  }
+
+  if (record.action_type === 'year_edited') {
+    return (
+      <div className="space-y-2">
+        <div>
+          <span className="font-semibold text-red-600">変更前:</span>
+          <div className="ml-4 text-xs space-y-1 mt-1">
+            <p>年度名: {details.old_data?.name}</p>
+            <p>期間: {details.old_data?.start_date} 〜 {details.old_data?.end_date}</p>
+            <p>現金期首残高: ¥{Number(details.old_data?.starting_balance_cash || 0).toLocaleString()}</p>
+            <p>銀行期首残高: ¥{Number(details.old_data?.starting_balance_bank || 0).toLocaleString()}</p>
+          </div>
+        </div>
+        <div>
+          <span className="font-semibold text-green-600">変更後:</span>
+          <div className="ml-4 text-xs space-y-1 mt-1">
+            <p>年度名: {details.new_data?.name}</p>
+            <p>期間: {details.new_data?.start_date} 〜 {details.new_data?.end_date}</p>
+            <p>現金期首残高: ¥{Number(details.new_data?.starting_balance_cash || 0).toLocaleString()}</p>
+            <p>銀行期首残高: ¥{Number(details.new_data?.starting_balance_bank || 0).toLocaleString()}</p>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (record.action_type === 'member_deleted') {
+    return (
+      <div className="space-y-1">
+        <p><span className="font-semibold">メンバー名:</span> {details.member_name}</p>
+        <p><span className="font-semibold">メールアドレス:</span> {details.member_email}</p>
+        {details.auth_deletion_failed && (
+          <p className="text-red-600"><span className="font-semibold">警告:</span> 認証ユーザーの削除に失敗</p>
+        )}
+      </div>
+    )
+  }
+
+  if (record.action_type === 'year_created') {
+    return (
+      <div className="space-y-1">
+        <p><span className="font-semibold">年度名:</span> {details.fiscal_year_name}</p>
+        <p><span className="font-semibold">期間:</span> {details.start_date} 〜 {details.end_date}</p>
+        <p><span className="font-semibold">現金期首残高:</span> ¥{Number(details.starting_balance_cash || 0).toLocaleString()}</p>
+        <p><span className="font-semibold">銀行期首残高:</span> ¥{Number(details.starting_balance_bank || 0).toLocaleString()}</p>
+        {details.used_current_balance && (
+          <p className="text-blue-600"><span className="font-semibold">※</span> 現在の残高を繰越金として設定</p>
+        )}
+      </div>
+    )
+  }
+
+  if (record.action_type === 'category_added') {
+    return (
+      <div className="space-y-1">
+        <p><span className="font-semibold">カテゴリー名:</span> {details.category_name}</p>
+        <p><span className="font-semibold">種類:</span> {details.category_type === 'income' ? '収入' : '支出'}</p>
+      </div>
+    )
+  }
+
+  if (record.action_type === 'category_edited') {
+    return (
+      <div className="space-y-1">
+        <p><span className="font-semibold">種類:</span> {details.category_type === 'income' ? '収入' : '支出'}</p>
+        <p><span className="font-semibold text-red-600">変更前:</span> {details.old_name}</p>
+        <p><span className="font-semibold text-green-600">変更後:</span> {details.new_name}</p>
+      </div>
+    )
+  }
+
+  if (record.action_type === 'category_deleted') {
+    return (
+      <div className="space-y-1">
+        <p><span className="font-semibold">カテゴリー名:</span> {details.category_name}</p>
+        <p><span className="font-semibold">種類:</span> {details.category_type === 'income' ? '収入' : '支出'}</p>
+      </div>
+    )
+  }
+
+  return <pre className="text-xs overflow-auto">{JSON.stringify(details, null, 2)}</pre>
 }
