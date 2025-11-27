@@ -1,0 +1,35 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background gradient -->
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#10b981;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#14b8a6;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#fbbf24;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#f59e0b;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+
+  <!-- Rounded square background -->
+  <rect width="512" height="512" rx="110" fill="url(#bg)"/>
+
+  <!-- Ledger book icon -->
+  <g transform="translate(106, 90)">
+    <!-- Book cover -->
+    <rect x="0" y="0" width="300" height="340" rx="16" fill="white" opacity="0.95"/>
+
+    <!-- Book spine highlight -->
+    <rect x="0" y="0" width="24" height="340" rx="16" fill="url(#accent)"/>
+
+    <!-- Horizontal lines (ledger lines) -->
+    <line x1="60" y1="80" x2="260" y2="80" stroke="#10b981" stroke-width="8" stroke-linecap="round"/>
+    <line x1="60" y1="130" x2="260" y2="130" stroke="#10b981" stroke-width="8" stroke-linecap="round"/>
+    <line x1="60" y1="180" x2="260" y2="180" stroke="#10b981" stroke-width="8" stroke-linecap="round"/>
+    <line x1="60" y1="230" x2="260" y2="230" stroke="#10b981" stroke-width="8" stroke-linecap="round"/>
+    <line x1="60" y1="280" x2="260" y2="280" stroke="#10b981" stroke-width="8" stroke-linecap="round"/>
+
+    <!-- Vertical separator (columns) -->
+    <line x1="180" y1="60" x2="180" y2="300" stroke="#14b8a6" stroke-width="6" opacity="0.5" stroke-linecap="round"/>
+  </g>
+</svg>
