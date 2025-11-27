@@ -189,6 +189,7 @@ export default function SettingsPage() {
     }
 
     if (!userProfile) return
+    if (!currentFiscalYear) return
 
     try {
       const { data: maxData } = await supabase
@@ -248,6 +249,7 @@ export default function SettingsPage() {
     }
 
     if (!userProfile) return
+    if (!currentFiscalYear) return
 
     try {
       // 変更前のデータを取得
@@ -293,6 +295,7 @@ export default function SettingsPage() {
 
   const handleDeleteCategory = async (categoryId: number, categoryName: string) => {
     if (!userProfile) return
+    if (!currentFiscalYear) return
 
     try {
       // このカテゴリーを使用している取引数を確認
