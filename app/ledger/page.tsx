@@ -41,7 +41,7 @@ type LedgerTab = 'journal' | 'category' | 'statement'
 
 export default function LedgerPage() {
   const router = useRouter()
-  const { currentFiscalYear } = useFiscalYear()
+  const { currentFiscalYear, isPastYear } = useFiscalYear()
   const { userProfile } = useAuth()
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
@@ -323,7 +323,11 @@ export default function LedgerPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center">
+      <div className={`min-h-screen flex items-center justify-center ${
+        isPastYear
+          ? 'bg-gradient-to-br from-gray-200 to-gray-300'
+          : 'bg-gradient-to-br from-gray-50 to-gray-100'
+      }`}>
         <p className="text-xl text-gray-600">読み込み中...</p>
       </div>
     )
@@ -334,7 +338,11 @@ export default function LedgerPage() {
 
   return (
     <ProtectedRoute>
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
+    <div className={`min-h-screen ${
+      isPastYear
+        ? 'bg-gradient-to-br from-gray-200 to-gray-300'
+        : 'bg-gradient-to-br from-gray-50 to-gray-100'
+    }`}>
       <Header
         title="帳簿"
         subtitle="全取引を確認・編集"
@@ -680,9 +688,25 @@ function CategoryLedgerView({
   categorySummary,
   formatCurrency,
 }: any) {
-  // 円グラフ用の色
-  const INCOME_COLORS = ['#10b981', '#34d399', '#6ee7b7', '#a7f3d0', '#d1fae5', '#059669', '#047857']
-  const EXPENSE_COLORS = ['#f43f5e', '#fb7185', '#fda4af', '#fecdd3', '#ffe4e6', '#e11d48', '#be123c']
+  // 円グラフ用の色（見やすさを重視した濃い色）
+  const INCOME_COLORS = [
+    '#059669', // 濃い緑
+    '#0891b2', // シアン
+    '#2563eb', // 青
+    '#7c3aed', // 紫
+    '#db2777', // ピンク
+    '#ea580c', // オレンジ
+    '#65a30d', // ライム
+  ]
+  const EXPENSE_COLORS = [
+    '#dc2626', // 濃い赤
+    '#ea580c', // オレンジ
+    '#d97706', // アンバー
+    '#ca8a04', // イエロー
+    '#65a30d', // ライム
+    '#0891b2', // シアン
+    '#7c3aed', // 紫
+  ]
 
   // 円グラフ用データの準備
   const incomePieData = categorySummary.income.map((item: CategorySummary) => ({
@@ -695,16 +719,61 @@ function CategoryLedgerView({
     value: item.total,
   }))
 
-  // カスタムツールチップ
-  const CustomTooltip = ({ active, payload }: any) => {
+  // 収入・支出の合計金額を計算
+  const incomeTotal = incomePieData.reduce((sum: number, item: any) => sum + item.value, 0)
+  const expenseTotal = expensePieData.reduce((sum: number, item: any) => sum + item.value, 0)
+
+  // カスタムラベル（2行表示）
+  const renderCustomLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, name, percent }: any) => {
+    const RADIAN = Math.PI / 180
+    const radius = outerRadius + 10
+    const x = cx + radius * Math.cos(-midAngle * RADIAN)
+    const y = cy + radius * Math.sin(-midAngle * RADIAN)
+    const percentage = percent ? (percent * 100).toFixed(0) : 0
+
+    return (
+      <text
+        x={x}
+        y={y}
+        fill="black"
+        textAnchor={x > cx ? 'start' : 'end'}
+        dominantBaseline="central"
+        style={{ fontSize: '10px', fontWeight: 'bold' }}
+      >
+        <tspan x={x} dy="0">{name}</tspan>
+        <tspan x={x} dy="12">{percentage}%</tspan>
+      </text>
+    )
+  }
+
+  // 収入用カスタムツールチップ
+  const IncomeTooltip = ({ active, payload }: any) => {
     if (active && payload && payload.length) {
+      const value = payload[0].value
+      const percentage = incomeTotal > 0 ? ((value / incomeTotal) * 100).toFixed(1) : '0.0'
+
       return (
         <div className="bg-white p-3 rounded-lg shadow-lg border border-gray-200">
           <p className="font-bold text-gray-800">{payload[0].name}</p>
-          <p className="text-sm text-gray-600">{formatCurrency(payload[0].value)}</p>
-          <p className="text-xs text-gray-500">
-            {((payload[0].value / payload[0].payload.total) * 100).toFixed(1)}%
-          </p>
+          <p className="text-sm text-gray-600">{formatCurrency(value)}</p>
+          <p className="text-xs text-gray-500">{percentage}%</p>
+        </div>
+      )
+    }
+    return null
+  }
+
+  // 支出用カスタムツールチップ
+  const ExpenseTooltip = ({ active, payload }: any) => {
+    if (active && payload && payload.length) {
+      const value = payload[0].value
+      const percentage = expenseTotal > 0 ? ((value / expenseTotal) * 100).toFixed(1) : '0.0'
+
+      return (
+        <div className="bg-white p-3 rounded-lg shadow-lg border border-gray-200">
+          <p className="font-bold text-gray-800">{payload[0].name}</p>
+          <p className="text-sm text-gray-600">{formatCurrency(value)}</p>
+          <p className="text-xs text-gray-500">{percentage}%</p>
         </div>
       )
     }
@@ -721,25 +790,26 @@ function CategoryLedgerView({
         ) : (
           <div className="space-y-6">
             {/* 円グラフ */}
-            <div className="bg-gradient-to-br from-emerald-50 to-green-50 rounded-lg p-6 border border-emerald-200">
-              <h3 className="text-lg font-bold text-emerald-800 mb-4 text-center">収入の内訳</h3>
-              <ResponsiveContainer width="100%" height={300}>
+            <div className="bg-gradient-to-br from-emerald-50/50 to-green-50/50 rounded-lg p-4 md:p-6 border border-emerald-200">
+              <h3 className="text-base md:text-lg font-bold text-emerald-800 mb-4 text-center">収入の内訳</h3>
+              <ResponsiveContainer width="100%" height={280}>
                 <PieChart>
                   <Pie
                     data={incomePieData}
                     cx="50%"
                     cy="50%"
                     labelLine={false}
-                    label={({ name, percent }) => `${name} ${percent ? (percent * 100).toFixed(0) : 0}%`}
-                    outerRadius={80}
+                    label={renderCustomLabel}
+                    outerRadius={60}
                     fill="#8884d8"
                     dataKey="value"
+                    style={{ outline: 'none' }}
                   >
                     {incomePieData.map((entry: any, index: number) => (
                       <Cell key={`cell-${index}`} fill={INCOME_COLORS[index % INCOME_COLORS.length]} />
                     ))}
                   </Pie>
-                  <Tooltip content={<CustomTooltip />} />
+                  <Tooltip content={<IncomeTooltip />} />
                   <Legend />
                 </PieChart>
               </ResponsiveContainer>
@@ -748,7 +818,7 @@ function CategoryLedgerView({
             {/* リスト表示 */}
             <div className="space-y-3">
               {categorySummary.income.map((item: CategorySummary) => (
-                <div key={item.category} className="flex justify-between items-center p-4 bg-emerald-50 rounded-lg border border-emerald-200">
+                <div key={item.category} className="flex justify-between items-center p-4 bg-emerald-50/60 rounded-lg border border-emerald-200">
                   <div>
                     <p className="font-bold text-gray-800">{item.category}</p>
                     <p className="text-sm text-gray-600">{item.count}件</p>
@@ -777,25 +847,26 @@ function CategoryLedgerView({
         ) : (
           <div className="space-y-6">
             {/* 円グラフ */}
-            <div className="bg-gradient-to-br from-rose-50 to-pink-50 rounded-lg p-6 border border-rose-200">
-              <h3 className="text-lg font-bold text-rose-800 mb-4 text-center">支出の内訳</h3>
-              <ResponsiveContainer width="100%" height={300}>
+            <div className="bg-gradient-to-br from-rose-50/50 to-pink-50/50 rounded-lg p-4 md:p-6 border border-rose-200">
+              <h3 className="text-base md:text-lg font-bold text-rose-800 mb-4 text-center">支出の内訳</h3>
+              <ResponsiveContainer width="100%" height={280}>
                 <PieChart>
                   <Pie
                     data={expensePieData}
                     cx="50%"
                     cy="50%"
                     labelLine={false}
-                    label={({ name, percent }) => `${name} ${percent ? (percent * 100).toFixed(0) : 0}%`}
-                    outerRadius={80}
+                    label={renderCustomLabel}
+                    outerRadius={60}
                     fill="#8884d8"
                     dataKey="value"
+                    style={{ outline: 'none' }}
                   >
                     {expensePieData.map((entry: any, index: number) => (
                       <Cell key={`cell-${index}`} fill={EXPENSE_COLORS[index % EXPENSE_COLORS.length]} />
                     ))}
                   </Pie>
-                  <Tooltip content={<CustomTooltip />} />
+                  <Tooltip content={<ExpenseTooltip />} />
                   <Legend />
                 </PieChart>
               </ResponsiveContainer>
@@ -804,7 +875,7 @@ function CategoryLedgerView({
             {/* リスト表示 */}
             <div className="space-y-3">
               {categorySummary.expense.map((item: CategorySummary) => (
-                <div key={item.category} className="flex justify-between items-center p-4 bg-rose-50 rounded-lg border border-rose-200">
+                <div key={item.category} className="flex justify-between items-center p-4 bg-rose-50/60 rounded-lg border border-rose-200">
                   <div>
                     <p className="font-bold text-gray-800">{item.category}</p>
                     <p className="text-sm text-gray-600">{item.count}件</p>

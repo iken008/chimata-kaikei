@@ -60,7 +60,7 @@ type DeletionVote = {
 export default function SettingsPage() {
   const router = useRouter()
   const { userProfile } = useAuth()
-  const { allFiscalYears, currentFiscalYear, refreshFiscalYears } = useFiscalYear()
+  const { allFiscalYears, currentFiscalYear, refreshFiscalYears, isPastYear } = useFiscalYear()
   const [activeTab, setActiveTab] = useState<SettingsTab>('fiscal')
   const [categories, setCategories] = useState<Category[]>([])
   const [editingFiscalYear, setEditingFiscalYear] = useState<number | null>(null)
@@ -834,7 +834,11 @@ export default function SettingsPage() {
 
   return (
     <ProtectedRoute>
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
+      <div className={`min-h-screen ${
+        isPastYear
+          ? 'bg-gradient-to-br from-gray-200 to-gray-300'
+          : 'bg-gradient-to-br from-gray-50 to-gray-100'
+      }`}>
         <Header
           title="設定"
           subtitle="年度・カテゴリーの管理"

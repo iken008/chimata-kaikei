@@ -20,6 +20,7 @@ type FiscalYearContextType = {
   setCurrentFiscalYear: (fiscalYear: FiscalYear) => void
   refreshFiscalYears: () => Promise<void>
   loading: boolean
+  isPastYear: boolean
 }
 
 const FiscalYearContext = createContext<FiscalYearContextType | undefined>(undefined)
@@ -97,6 +98,11 @@ export function FiscalYearProvider({ children }: { children: ReactNode }) {
     await fetchFiscalYears()
   }
 
+  // 過去年度かどうかを判定（リアルタイムの現在日付で判定）
+  const isPastYear = currentFiscalYear
+    ? new Date() > new Date(currentFiscalYear.end_date)
+    : false
+
   return (
     <FiscalYearContext.Provider
       value={{
@@ -105,6 +111,7 @@ export function FiscalYearProvider({ children }: { children: ReactNode }) {
         setCurrentFiscalYear,
         refreshFiscalYears,
         loading,
+        isPastYear,
       }}
     >
       {children}
