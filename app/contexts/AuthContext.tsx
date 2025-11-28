@@ -228,6 +228,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           console.error('❌ signUp: 招待コード更新APIエラー', error)
         }
       }
+
+      // 削除提案の必要承認数を再計算（新メンバー追加により必要数が増える可能性）
+      console.log('📊 signUp: 必要承認数の再計算開始')
+      try {
+        const response = await fetch('/api/proposals/recalculate', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        })
+
+        const data = await response.json()
+
+        if (!response.ok) {
+          console.error('❌ signUp: 必要承認数の再計算失敗', data.error)
+        } else {
+          console.log('✅ signUp: 必要承認数の再計算成功')
+        }
+      } catch (error) {
+        console.error('❌ signUp: 必要承認数の再計算APIエラー', error)
+      }
     }
   }
 
