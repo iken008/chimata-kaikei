@@ -1,36 +1,174 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ちまたの会計 mini
 
-## Getting Started
+透明性のある会計管理システム - サークル・コミュニティ向けの民主的な会計アプリケーション
 
-First, run the development server:
+## 概要
+
+「ちまたの会計 mini」は、サークルやコミュニティの会計を透明かつ民主的に管理するためのWebアプリケーションです。**「みんなで見張る」**という設計思想のもと、全てのメンバーが取引を閲覧でき、重要な操作には多数決による承認が必要となります。
+
+## 主な機能
+
+### 📊 会計管理
+- **複数年度対応**: 年度ごとに会計データを管理
+- **取引記録**: 収入・支出・口座間移動の記録
+- **領収書管理**: 画像アップロード機能
+- **カテゴリー管理**: 収入・支出のカテゴリーをカスタマイズ可能
+- **デフォルトカテゴリー**: サークル向けの標準カテゴリーを自動作成
+
+### 🗳️ 民主的な運営
+- **削除提案システム**: 年度削除には多数決による承認が必要
+- **再投票機能**: 投票内容の変更が可能
+- **自動承認**: 過半数の承認で即座に実行可能
+- **提案キャンセル**: 承認後でも保留に戻すことが可能
+
+### 👥 メンバー管理
+- **アカウント登録制**: メンバーのみがアクセス可能
+- **権限管理**: Supabase RLSによる安全なアクセス制御
+- **透明性**: 全ての操作履歴を記録
+
+### 📦 データ管理
+- **アーカイブ機能**: 年度データをZIPファイルで一括エクスポート
+  - 出納帳（提出用CSV）
+  - 決算報告書（収支計算書）
+  - 完全版取引データ
+  - 領収書画像（リネーム済み）
+- **容量管理**: データベースとストレージの使用状況を可視化
+
+### 📱 PWA対応
+- インストール可能なWebアプリ
+- オフライン機能（一部）
+- モバイルフレンドリーなUI
+
+## 技術スタック
+
+- **フロントエンド**: Next.js 15 (App Router)
+- **言語**: TypeScript
+- **スタイリング**: Tailwind CSS
+- **データベース**: Supabase (PostgreSQL)
+- **認証**: Supabase Auth
+- **ストレージ**: Supabase Storage
+- **デプロイ**: Vercel / その他
+
+## セットアップ
+
+### 必要要件
+
+- Node.js 18.x 以上
+- npm または yarn
+- Supabaseアカウント
+
+### 1. リポジトリのクローン
+
+```bash
+git clone https://github.com/your-username/chimata-kaikei.git
+cd chimata-kaikei
+```
+
+### 2. 依存関係のインストール
+
+```bash
+npm install
+```
+
+### 3. 環境変数の設定
+
+`.env.local` ファイルを作成し、以下の環境変数を設定：
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=your-supabase-project-url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
+```
+
+詳細は `.env.example` を参照してください。
+
+### 4. データベースのセットアップ
+
+Supabaseプロジェクトを作成し、データベーススキーマをセットアップします。
+
+詳細な手順は [DATABASE_SETUP.md](./docs/DATABASE_SETUP.md) を参照してください。
+
+### 5. 開発サーバーの起動
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+ブラウザで [http://localhost:3000](http://localhost:3000) を開きます。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## ドキュメント
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- [データベースセットアップガイド](./docs/DATABASE_SETUP.md) - Supabaseの設定とスキーマ作成
+- [投票システムガイド](./VOTING_SYSTEM_GUIDE.md) - 削除提案と多数決システムの詳細
+- [データ保持ポリシー](./DATA_RETENTION_POLICY.md) - データ管理のベストプラクティス
+- [アイコンセットアップ](./ICON_SETUP_GUIDE.md) - PWAアイコンの設定方法
 
-## Learn More
+## 使い方
 
-To learn more about Next.js, take a look at the following resources:
+### 初回セットアップ
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+1. **アカウント登録**: 初回アクセス時にアカウントを作成
+2. **年度作成**: 現在の会計年度を作成
+3. **カテゴリー設定**: デフォルトカテゴリーまたは前年度から引き継ぎ
+4. **口座設定**: 現金・銀行口座の初期残高を設定
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### 日常的な使用
 
-## Deploy on Vercel
+1. **取引記録**: 収入・支出を記録
+2. **領収書アップロード**: 必要に応じて領収書画像を添付
+3. **残高確認**: ダッシュボードで現在の残高を確認
+4. **履歴確認**: 過去の取引を検索・閲覧
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### 年度末処理
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+1. **アーカイブ作成**: 年度データをエクスポート
+2. **新年度作成**: 繰越金を設定して新年度を開始
+3. **古い年度の削除**: 必要に応じて多数決で削除
+
+## デフォルトカテゴリー
+
+年度作成時に以下のカテゴリーが自動作成されます：
+
+**収入（5件）:**
+- 会費
+- イベント参加費
+- 物販収入
+- 寄付・助成金
+- その他収入
+
+**支出（8件）:**
+- 交通費
+- 食費
+- 備品購入
+- 消耗品費
+- 会場費
+- 印刷費
+- 通信費
+- その他支出
+
+## セキュリティ
+
+- **Row Level Security (RLS)**: データベースレベルでアクセス制御
+- **認証必須**: 全ての操作に認証が必要
+- **監査ログ**: 全ての重要な操作を記録
+- **投票による削除**: 年度削除には多数決が必要
+
+## 貢献
+
+プルリクエストを歓迎します。大きな変更の場合は、まずissueを開いて変更内容を議論してください。
+
+## ライセンス
+
+[MIT](LICENSE)
+
+## 開発者
+
+- 開発: Claude Code + Human collaboration
+- デザイン思想: 透明性と民主的運営
+
+## サポート
+
+問題が発生した場合は、[Issues](https://github.com/your-username/chimata-kaikei/issues) で報告してください。
+
+---
+
+**「みんなで見張る」- 透明性のある会計管理を**

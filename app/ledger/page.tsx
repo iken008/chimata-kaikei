@@ -8,6 +8,7 @@ import Header from '../components/Header'
 import Image from 'next/image'
 import ProtectedRoute from '../components/ProtectedRoute'
 import { useAuth } from '../contexts/AuthContext'
+import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from 'recharts'
 
 type Account = {
   id: number
@@ -446,6 +447,7 @@ function JournalView({
   getAccountName,
 }: any) {
   const [expandedReceiptIds, setExpandedReceiptIds] = useState<Set<string>>(new Set())
+  const [isFilterExpanded, setIsFilterExpanded] = useState(false)
 
   const toggleReceipt = (id: string) => {
     const newExpanded = new Set(expandedReceiptIds)
@@ -461,64 +463,76 @@ function JournalView({
     <>
       {/* フィルター */}
       <div className="mb-6">
-        <h3 className="font-bold mb-3">絞り込み</h3>
-        
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div>
-            <label className="block text-sm text-gray-700 font-semibold mb-1">種類</label>
-            <select
-              value={filterType}
-              onChange={(e) => setFilterType(e.target.value)}
-              className="w-full p-2 border border-gray-300 rounded"
-            >
-              <option value="all">全て</option>
-              <option value="income">収入</option>
-              <option value="expense">支出</option>
-              <option value="transfer">移動</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm text-gray-700 font-semibold mb-1">口座</label>
-            <select
-              value={filterAccount}
-              onChange={(e) => setFilterAccount(e.target.value)}
-              className="w-full p-2 border border-gray-300 rounded"
-            >
-              <option value="all">全て</option>
-              <option value="1">現金</option>
-              <option value="2">ゆうちょ銀行</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm text-gray-700 font-semibold mb-1">期間</label>
-            <select
-              value={filterMonth}
-              onChange={(e) => setFilterMonth(e.target.value)}
-              className="w-full p-2 border border-gray-300 rounded"
-            >
-              {monthOptions.map((option: any) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-bold">絞り込み</h3>
+          {/* スマホのみ表示される折りたたみボタン */}
+          <button
+            onClick={() => setIsFilterExpanded(!isFilterExpanded)}
+            className="md:hidden text-sm text-violet-600 hover:text-violet-800 font-semibold"
+          >
+            {isFilterExpanded ? '▲ 閉じる' : '▼ 開く'}
+          </button>
         </div>
 
-        {(filterType !== 'all' || filterAccount !== 'all' || filterMonth !== 'all') && (
-          <button
-            onClick={() => {
-              setFilterType('all')
-              setFilterAccount('all')
-              setFilterMonth('all')
-            }}
-            className="mt-3 text-sm text-violet-600 hover:text-violet-800"
-          >
-            ✕ フィルターをリセット
-          </button>
-        )}
+        {/* フィルター内容（スマホでは折りたたみ可能、PCでは常に表示） */}
+        <div className={`${isFilterExpanded ? 'block' : 'hidden'} md:block`}>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm text-gray-700 font-semibold mb-1">種類</label>
+              <select
+                value={filterType}
+                onChange={(e) => setFilterType(e.target.value)}
+                className="w-full p-2 border border-gray-300 rounded"
+              >
+                <option value="all">全て</option>
+                <option value="income">収入</option>
+                <option value="expense">支出</option>
+                <option value="transfer">移動</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm text-gray-700 font-semibold mb-1">口座</label>
+              <select
+                value={filterAccount}
+                onChange={(e) => setFilterAccount(e.target.value)}
+                className="w-full p-2 border border-gray-300 rounded"
+              >
+                <option value="all">全て</option>
+                <option value="1">現金</option>
+                <option value="2">ゆうちょ銀行</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm text-gray-700 font-semibold mb-1">期間</label>
+              <select
+                value={filterMonth}
+                onChange={(e) => setFilterMonth(e.target.value)}
+                className="w-full p-2 border border-gray-300 rounded"
+              >
+                {monthOptions.map((option: any) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {(filterType !== 'all' || filterAccount !== 'all' || filterMonth !== 'all') && (
+            <button
+              onClick={() => {
+                setFilterType('all')
+                setFilterAccount('all')
+                setFilterMonth('all')
+              }}
+              className="mt-3 text-sm text-violet-600 hover:text-violet-800"
+            >
+              ✕ フィルターをリセット
+            </button>
+          )}
+        </div>
       </div>
 
       {/* 合計金額表示 */}
@@ -666,31 +680,90 @@ function CategoryLedgerView({
   categorySummary,
   formatCurrency,
 }: any) {
+  // 円グラフ用の色
+  const INCOME_COLORS = ['#10b981', '#34d399', '#6ee7b7', '#a7f3d0', '#d1fae5', '#059669', '#047857']
+  const EXPENSE_COLORS = ['#f43f5e', '#fb7185', '#fda4af', '#fecdd3', '#ffe4e6', '#e11d48', '#be123c']
+
+  // 円グラフ用データの準備
+  const incomePieData = categorySummary.income.map((item: CategorySummary) => ({
+    name: item.category,
+    value: item.total,
+  }))
+
+  const expensePieData = categorySummary.expense.map((item: CategorySummary) => ({
+    name: item.category,
+    value: item.total,
+  }))
+
+  // カスタムツールチップ
+  const CustomTooltip = ({ active, payload }: any) => {
+    if (active && payload && payload.length) {
+      return (
+        <div className="bg-white p-3 rounded-lg shadow-lg border border-gray-200">
+          <p className="font-bold text-gray-800">{payload[0].name}</p>
+          <p className="text-sm text-gray-600">{formatCurrency(payload[0].value)}</p>
+          <p className="text-xs text-gray-500">
+            {((payload[0].value / payload[0].payload.total) * 100).toFixed(1)}%
+          </p>
+        </div>
+      )
+    }
+    return null
+  }
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {/* 収入 */}
       <div>
         <h2 className="text-xl font-bold mb-4 text-emerald-700">収入</h2>
         {categorySummary.income.length === 0 ? (
           <p className="text-gray-500 text-center py-4">収入がありません</p>
         ) : (
-          <div className="space-y-3">
-            {categorySummary.income.map((item: CategorySummary) => (
-              <div key={item.category} className="flex justify-between items-center p-4 bg-emerald-50 rounded-lg border border-emerald-200">
-                <div>
-                  <p className="font-bold text-gray-800">{item.category}</p>
-                  <p className="text-sm text-gray-600">{item.count}件</p>
+          <div className="space-y-6">
+            {/* 円グラフ */}
+            <div className="bg-gradient-to-br from-emerald-50 to-green-50 rounded-lg p-6 border border-emerald-200">
+              <h3 className="text-lg font-bold text-emerald-800 mb-4 text-center">収入の内訳</h3>
+              <ResponsiveContainer width="100%" height={300}>
+                <PieChart>
+                  <Pie
+                    data={incomePieData}
+                    cx="50%"
+                    cy="50%"
+                    labelLine={false}
+                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                    outerRadius={80}
+                    fill="#8884d8"
+                    dataKey="value"
+                  >
+                    {incomePieData.map((entry: any, index: number) => (
+                      <Cell key={`cell-${index}`} fill={INCOME_COLORS[index % INCOME_COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip content={<CustomTooltip />} />
+                  <Legend />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* リスト表示 */}
+            <div className="space-y-3">
+              {categorySummary.income.map((item: CategorySummary) => (
+                <div key={item.category} className="flex justify-between items-center p-4 bg-emerald-50 rounded-lg border border-emerald-200">
+                  <div>
+                    <p className="font-bold text-gray-800">{item.category}</p>
+                    <p className="text-sm text-gray-600">{item.count}件</p>
+                  </div>
+                  <p className="text-2xl font-bold text-emerald-600">
+                    +{formatCurrency(item.total)}
+                  </p>
                 </div>
-                <p className="text-2xl font-bold text-emerald-600">
-                  +{formatCurrency(item.total)}
+              ))}
+              <div className="flex justify-between items-center p-4 bg-emerald-100 rounded-lg border border-emerald-300">
+                <p className="font-bold text-gray-800">収入合計</p>
+                <p className="text-2xl font-bold text-emerald-700">
+                  +{formatCurrency(categorySummary.income.reduce((sum: number, item: CategorySummary) => sum + item.total, 0))}
                 </p>
               </div>
-            ))}
-            <div className="flex justify-between items-center p-4 bg-emerald-100 rounded-lg border border-emerald-300">
-              <p className="font-bold text-gray-800">収入合計</p>
-              <p className="text-2xl font-bold text-emerald-700">
-                +{formatCurrency(categorySummary.income.reduce((sum: number, item: CategorySummary) => sum + item.total, 0))}
-              </p>
             </div>
           </div>
         )}
@@ -702,23 +775,51 @@ function CategoryLedgerView({
         {categorySummary.expense.length === 0 ? (
           <p className="text-gray-500 text-center py-4">支出がありません</p>
         ) : (
-          <div className="space-y-3">
-            {categorySummary.expense.map((item: CategorySummary) => (
-              <div key={item.category} className="flex justify-between items-center p-4 bg-rose-50 rounded-lg border border-rose-200">
-                <div>
-                  <p className="font-bold text-gray-800">{item.category}</p>
-                  <p className="text-sm text-gray-600">{item.count}件</p>
+          <div className="space-y-6">
+            {/* 円グラフ */}
+            <div className="bg-gradient-to-br from-rose-50 to-pink-50 rounded-lg p-6 border border-rose-200">
+              <h3 className="text-lg font-bold text-rose-800 mb-4 text-center">支出の内訳</h3>
+              <ResponsiveContainer width="100%" height={300}>
+                <PieChart>
+                  <Pie
+                    data={expensePieData}
+                    cx="50%"
+                    cy="50%"
+                    labelLine={false}
+                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                    outerRadius={80}
+                    fill="#8884d8"
+                    dataKey="value"
+                  >
+                    {expensePieData.map((entry: any, index: number) => (
+                      <Cell key={`cell-${index}`} fill={EXPENSE_COLORS[index % EXPENSE_COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip content={<CustomTooltip />} />
+                  <Legend />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* リスト表示 */}
+            <div className="space-y-3">
+              {categorySummary.expense.map((item: CategorySummary) => (
+                <div key={item.category} className="flex justify-between items-center p-4 bg-rose-50 rounded-lg border border-rose-200">
+                  <div>
+                    <p className="font-bold text-gray-800">{item.category}</p>
+                    <p className="text-sm text-gray-600">{item.count}件</p>
+                  </div>
+                  <p className="text-2xl font-bold text-rose-600">
+                    -{formatCurrency(item.total)}
+                  </p>
                 </div>
-                <p className="text-2xl font-bold text-rose-600">
-                  -{formatCurrency(item.total)}
+              ))}
+              <div className="flex justify-between items-center p-4 bg-rose-100 rounded-lg border border-rose-300">
+                <p className="font-bold text-gray-800">支出合計</p>
+                <p className="text-2xl font-bold text-rose-700">
+                  -{formatCurrency(categorySummary.expense.reduce((sum: number, item: CategorySummary) => sum + item.total, 0))}
                 </p>
               </div>
-            ))}
-            <div className="flex justify-between items-center p-4 bg-rose-100 rounded-lg border border-rose-300">
-              <p className="font-bold text-gray-800">支出合計</p>
-              <p className="text-2xl font-bold text-rose-700">
-                -{formatCurrency(categorySummary.expense.reduce((sum: number, item: CategorySummary) => sum + item.total, 0))}
-              </p>
             </div>
           </div>
         )}

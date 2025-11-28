@@ -68,9 +68,10 @@ export default function AddFiscalYearModal({
 
       if (error) throw error
 
-      // カテゴリーをコピー
+      // カテゴリーをコピーまたはデフォルトを作成
       let copiedCategoriesCount = 0
       if (copyCategories && currentFiscalYear) {
+        // 前年度からカテゴリーをコピー
         const { data: existingCategories } = await supabase
           .from('categories')
           .select('*')
@@ -95,10 +96,45 @@ export default function AddFiscalYearModal({
             console.error('Error copying categories:', categoriesError)
           }
         }
+      } else {
+        // デフォルトカテゴリーを作成
+        const defaultCategories = [
+          // 収入カテゴリー
+          { name: '会費', type: 'income' as const, sort_order: 1, fiscal_year_id: newFiscalYear.id },
+          { name: 'イベント参加費', type: 'income' as const, sort_order: 2, fiscal_year_id: newFiscalYear.id },
+          { name: '物販収入', type: 'income' as const, sort_order: 3, fiscal_year_id: newFiscalYear.id },
+          { name: '寄付・助成金', type: 'income' as const, sort_order: 4, fiscal_year_id: newFiscalYear.id },
+          { name: 'その他収入', type: 'income' as const, sort_order: 5, fiscal_year_id: newFiscalYear.id },
+          // 支出カテゴリー
+          { name: '交通費', type: 'expense' as const, sort_order: 1, fiscal_year_id: newFiscalYear.id },
+          { name: '食費', type: 'expense' as const, sort_order: 2, fiscal_year_id: newFiscalYear.id },
+          { name: '備品購入', type: 'expense' as const, sort_order: 3, fiscal_year_id: newFiscalYear.id },
+          { name: '消耗品費', type: 'expense' as const, sort_order: 4, fiscal_year_id: newFiscalYear.id },
+          { name: '会場費', type: 'expense' as const, sort_order: 5, fiscal_year_id: newFiscalYear.id },
+          { name: '印刷費', type: 'expense' as const, sort_order: 6, fiscal_year_id: newFiscalYear.id },
+          { name: '通信費', type: 'expense' as const, sort_order: 7, fiscal_year_id: newFiscalYear.id },
+          { name: 'その他支出', type: 'expense' as const, sort_order: 8, fiscal_year_id: newFiscalYear.id },
+        ]
+
+        const { error: categoriesError } = await supabase
+          .from('categories')
+          .insert(defaultCategories)
+
+        if (!categoriesError) {
+          copiedCategoriesCount = defaultCategories.length
+        } else {
+          console.error('Error creating default categories:', categoriesError)
+        }
       }
 
       // システム履歴に記録
       if (userProfile && newFiscalYear) {
+        const categoryDescription = copyCategories && currentFiscalYear
+          ? `、カテゴリー${copiedCategoriesCount}件をコピー`
+          : copiedCategoriesCount > 0
+          ? `、デフォルトカテゴリー${copiedCategoriesCount}件を作成`
+          : ''
+
         await supabase.from('system_history').insert({
           action_type: 'year_created',
           target_type: 'fiscal_year',
@@ -112,14 +148,17 @@ export default function AddFiscalYearModal({
             starting_balance_bank: fiscalYearData.starting_balance_bank,
             used_current_balance: useCurrentBalance,
             copied_categories: copyCategories,
-            copied_categories_count: copiedCategoriesCount,
+            categories_count: copiedCategoriesCount,
+            used_default_categories: !copyCategories && copiedCategoriesCount > 0,
           },
-          description: `年度「${name}」を作成しました（${startDate} 〜 ${endDate}）${copyCategories ? `、カテゴリー${copiedCategoriesCount}件をコピー` : ''}`,
+          description: `年度「${name}」を作成しました（${startDate} 〜 ${endDate}）${categoryDescription}`,
         })
       }
 
       const successMessage = copyCategories && copiedCategoriesCount > 0
         ? `新しい年度を作成しました！\n\nカテゴリー${copiedCategoriesCount}件を前年度からコピーしました。`
+        : copiedCategoriesCount > 0
+        ? `新しい年度を作成しました！\n\nデフォルトカテゴリー${copiedCategoriesCount}件（収入5件・支出8件）を作成しました。`
         : '新しい年度を作成しました！'
 
       alert(successMessage)
@@ -228,8 +267,17 @@ export default function AddFiscalYearModal({
                 </span>
               </label>
               <p className="text-xs text-gray-600 mt-2 ml-6">
-                チェックすると、現在の年度のカテゴリーが新年度にコピーされます。
+                {copyCategories
+                  ? '現在の年度のカテゴリーが新年度にコピーされます。'
+                  : 'デフォルトカテゴリー（収入5件・支出8件）が作成されます。'}
               </p>
+              {!copyCategories && (
+                <div className="text-xs text-gray-700 mt-2 ml-6 bg-white p-2 rounded border border-green-300">
+                  <p className="font-semibold mb-1">📋 作成されるカテゴリー:</p>
+                  <p>【収入】会費、イベント参加費、物販収入、寄付・助成金、その他収入</p>
+                  <p>【支出】交通費、食費、備品購入、消耗品費、会場費、印刷費、通信費、その他支出</p>
+                </div>
+              )}
             </div>
 
             {/* 繰越金設定 */}

@@ -34,6 +34,29 @@ type StorageUsage = {
   imageCount: number
 }
 
+type DeletionProposal = {
+  id: string
+  fiscal_year_id: number
+  fiscal_year_name: string
+  proposed_by: string
+  proposed_at: string
+  status: 'pending' | 'approved' | 'rejected' | 'expired' | 'executed'
+  expires_at: string
+  total_members: number
+  required_approvals: number
+  approve_count: number
+  reject_count: number
+  proposer_name?: string
+}
+
+type DeletionVote = {
+  id: string
+  proposal_id: string
+  user_id: string
+  vote: 'approve' | 'reject'
+  voted_at: string
+}
+
 export default function SettingsPage() {
   const router = useRouter()
   const { userProfile } = useAuth()
@@ -46,6 +69,8 @@ export default function SettingsPage() {
   const [newCategoryType, setNewCategoryType] = useState<'income' | 'expense'>('income')
   const [storageUsage, setStorageUsage] = useState<StorageUsage | null>(null)
   const [loadingUsage, setLoadingUsage] = useState(false)
+  const [deletionProposals, setDeletionProposals] = useState<DeletionProposal[]>([])
+  const [myVotes, setMyVotes] = useState<Record<string, DeletionVote>>({})
 
   useEffect(() => {
     if (currentFiscalYear) {
@@ -58,6 +83,53 @@ export default function SettingsPage() {
       fetchCategories()
     }
   }, [activeTab, currentFiscalYear])
+
+  useEffect(() => {
+    if (activeTab === 'data') {
+      fetchDeletionProposals()
+
+      // リアルタイム更新を購読
+      const proposalsSubscription = supabase
+        .channel('deletion_proposals_changes')
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'deletion_proposals',
+          },
+          (payload) => {
+            console.log('提案が更新されました:', payload)
+            // リアルタイム更新のみ - 通知はsystem_historyで記録
+            fetchDeletionProposals()
+          }
+        )
+        .subscribe()
+
+      const votesSubscription = supabase
+        .channel('deletion_votes_changes')
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'deletion_votes',
+          },
+          (payload) => {
+            console.log('投票が更新されました:', payload)
+            fetchDeletionProposals()
+          }
+        )
+        .subscribe()
+
+      // クリーンアップ
+      return () => {
+        supabase.removeChannel(proposalsSubscription)
+        supabase.removeChannel(votesSubscription)
+      }
+    }
+  }, [activeTab])
+
 
   const fetchCategories = async () => {
     if (!currentFiscalYear) return
@@ -120,6 +192,393 @@ export default function SettingsPage() {
       console.error('Error fetching storage usage:', error)
     } finally {
       setLoadingUsage(false)
+    }
+  }
+
+  // 削除提案を取得
+  const fetchDeletionProposals = async () => {
+    try {
+      const { data: proposals, error } = await supabase
+        .from('deletion_proposals')
+        .select(`
+          *,
+          proposer:users!deletion_proposals_proposed_by_fkey(name)
+        `)
+        .in('status', ['pending', 'approved'])
+        .order('proposed_at', { ascending: false })
+
+      if (error) throw error
+
+      const proposalsWithNames = proposals?.map(p => ({
+        ...p,
+        proposer_name: p.proposer?.name,
+      })) || []
+
+      setDeletionProposals(proposalsWithNames)
+
+      // 自分の投票を取得
+      if (userProfile) {
+        const { data: votes } = await supabase
+          .from('deletion_votes')
+          .select('*')
+          .eq('user_id', userProfile.id)
+
+        const votesMap: Record<string, DeletionVote> = {}
+        votes?.forEach(vote => {
+          votesMap[vote.proposal_id] = vote
+        })
+        setMyVotes(votesMap)
+      }
+    } catch (error) {
+      console.error('Error fetching deletion proposals:', error)
+    }
+  }
+
+  // 削除提案を作成
+  const handleProposeDeletion = async (fiscalYearId: number, fiscalYearName: string) => {
+    if (!userProfile) {
+      alert('ユーザー情報が取得できません')
+      return
+    }
+
+    try {
+      console.log('削除提案の作成を開始:', { fiscalYearId, fiscalYearName, userId: userProfile.id })
+
+      // メンバー数を取得
+      const { count: memberCount, error: countError } = await supabase
+        .from('users')
+        .select('*', { count: 'exact', head: true })
+
+      if (countError) {
+        console.error('メンバー数取得エラー:', countError)
+        throw countError
+      }
+
+      const totalMembers = memberCount || 1
+      const requiredApprovals = Math.ceil(totalMembers / 2) // 過半数
+
+      console.log('投票設定:', { totalMembers, requiredApprovals })
+
+      // 提案データを準備
+      const proposalData = {
+        fiscal_year_id: fiscalYearId,
+        fiscal_year_name: fiscalYearName,
+        proposed_by: userProfile.id,
+        total_members: totalMembers,
+        required_approvals: requiredApprovals,
+      }
+
+      console.log('挿入するデータ:', proposalData)
+
+      // 提案を作成（まずinsertだけ試す）
+      const { data: insertedData, error: insertError } = await supabase
+        .from('deletion_proposals')
+        .insert(proposalData)
+        .select()
+
+      console.log('Insert結果:', { data: insertedData, error: insertError })
+
+      if (insertError) {
+        console.error('Insert error details:', {
+          message: insertError.message,
+          details: insertError.details,
+          hint: insertError.hint,
+          code: insertError.code,
+          full: insertError,
+        })
+        throw insertError
+      }
+
+      if (!insertedData || insertedData.length === 0) {
+        throw new Error('提案の作成に失敗しました（データが返されませんでした）')
+      }
+
+      const proposal = insertedData[0]
+      console.log('作成された提案:', proposal)
+
+      // システム履歴に記録
+      await supabase.from('system_history').insert({
+        action_type: 'year_deletion_proposed',
+        target_type: 'fiscal_year',
+        target_id: String(fiscalYearId),
+        performed_by: userProfile.id,
+        details: {
+          fiscal_year_name: fiscalYearName,
+          total_members: totalMembers,
+          required_approvals: requiredApprovals,
+          proposal_id: proposal.id,
+        },
+        description: `年度「${fiscalYearName}」の削除を提案しました（要承認: ${requiredApprovals}/${totalMembers}）`,
+      })
+
+      alert(
+        `削除提案を作成しました\n\n` +
+        `年度: ${fiscalYearName}\n` +
+        `必要な承認数: ${requiredApprovals}/${totalMembers}\n` +
+        `有効期限: 48時間`
+      )
+
+      await fetchDeletionProposals()
+    } catch (error: any) {
+      console.error('Error creating deletion proposal:', error)
+      alert(
+        `エラーが発生しました\n\n` +
+        `エラー詳細:\n` +
+        `${error?.message || error?.toString() || 'Unknown error'}\n\n` +
+        `ヒント: データベーステーブルが作成されているか確認してください。`
+      )
+    }
+  }
+
+  // 投票する（再投票も可能）
+  const handleVote = async (proposalId: string, vote: 'approve' | 'reject') => {
+    if (!userProfile) return
+
+    try {
+      console.log('=== 投票処理開始 ===')
+      console.log('投票情報:', { proposalId, vote, userId: userProfile.id })
+
+      // 既存の投票を確認
+      console.log('ステップ1: 既存投票を確認中...')
+      const { data: existingVote, error: fetchError } = await supabase
+        .from('deletion_votes')
+        .select('*')
+        .eq('proposal_id', proposalId)
+        .eq('user_id', userProfile.id)
+        .maybeSingle()  // single()の代わりにmaybeSingle()を使用（存在しない場合もエラーにならない）
+
+      if (fetchError) {
+        console.error('既存投票の確認でエラー:', fetchError)
+        throw new Error(`既存投票の確認に失敗: ${fetchError.message}`)
+      }
+
+      console.log('既存投票:', existingVote)
+
+      if (existingVote) {
+        // 既に投票済みの場合は更新
+        console.log('ステップ2: 投票を更新します')
+        console.log('変更内容:', { from: existingVote.vote, to: vote })
+
+        const { error: updateError } = await supabase
+          .from('deletion_votes')
+          .update({ vote, voted_at: new Date().toISOString() })
+          .eq('proposal_id', proposalId)
+          .eq('user_id', userProfile.id)
+
+        if (updateError) {
+          console.error('UPDATE エラー:', updateError)
+          throw new Error(`投票の更新に失敗: ${updateError.message} (code: ${updateError.code})`)
+        }
+
+        console.log('✅ 更新成功')
+        alert(
+          `投票を変更しました\n\n` +
+          `${existingVote.vote === 'approve' ? '賛成' : '反対'} → ${vote === 'approve' ? '賛成' : '反対'}`
+        )
+      } else {
+        // 新規投票
+        console.log('ステップ2: 新規投票を挿入します')
+
+        const { error: insertError } = await supabase
+          .from('deletion_votes')
+          .insert({
+            proposal_id: proposalId,
+            user_id: userProfile.id,
+            vote,
+          })
+
+        if (insertError) {
+          console.error('INSERT エラー:', insertError)
+          throw new Error(`投票の挿入に失敗: ${insertError.message} (code: ${insertError.code})`)
+        }
+
+        console.log('✅ 挿入成功')
+        alert(vote === 'approve' ? '承認しました' : '却下しました')
+      }
+
+      // トリガーが実行されるまで少し待つ
+      console.log('ステップ3: データ更新を待機中...')
+      await new Promise(resolve => setTimeout(resolve, 500))
+
+      // 提案データを再取得
+      console.log('ステップ4: 提案データを再取得します')
+      await fetchDeletionProposals()
+
+      console.log('=== 投票処理完了 ===')
+    } catch (error: any) {
+      console.error('❌ 投票エラー:', error)
+      console.error('エラーの型:', typeof error)
+      console.error('エラーオブジェクト:', JSON.stringify(error, null, 2))
+      console.error('エラー詳細:', {
+        message: error?.message,
+        code: error?.code,
+        details: error?.details,
+        hint: error?.hint,
+        stack: error?.stack,
+      })
+      alert(
+        `投票中にエラーが発生しました\n\n` +
+        `${error?.message || JSON.stringify(error) || 'Unknown error'}\n\n` +
+        `コンソールログを確認してください。`
+      )
+    }
+  }
+
+  // 承認された提案をキャンセル（保留に戻す）
+  const handleCancelProposal = async (proposal: DeletionProposal) => {
+    if (!userProfile) return
+
+    if (!confirm(
+      `承認された削除提案をキャンセルしますか？\n\n` +
+      `年度: ${proposal.fiscal_year_name}\n` +
+      `現在の状態: 承認済み\n\n` +
+      `キャンセルすると、提案は「保留中」に戻り、投票は継続されます。`
+    )) {
+      return
+    }
+
+    try {
+      const { error } = await supabase
+        .from('deletion_proposals')
+        .update({ status: 'pending' })
+        .eq('id', proposal.id)
+
+      if (error) throw error
+
+      // システム履歴に記録
+      await supabase.from('system_history').insert({
+        action_type: 'proposal_cancelled',
+        target_type: 'fiscal_year',
+        target_id: String(proposal.fiscal_year_id),
+        performed_by: userProfile.id,
+        details: {
+          fiscal_year_name: proposal.fiscal_year_name,
+          proposal_id: proposal.id,
+          previous_status: 'approved',
+          votes_approve: proposal.approve_count,
+          votes_reject: proposal.reject_count,
+        },
+        description: `年度「${proposal.fiscal_year_name}」の削除提案をキャンセルしました（承認→保留）`,
+      })
+
+      alert('提案をキャンセルしました。投票は継続されます。')
+      await fetchDeletionProposals()
+    } catch (error) {
+      console.error('Error cancelling proposal:', error)
+      alert('エラーが発生しました')
+    }
+  }
+
+  // 承認された提案の削除を実行
+  const handleExecuteDeletion = async (proposal: DeletionProposal) => {
+    if (!userProfile) return
+    if (proposal.status !== 'approved') return
+
+    if (!confirm(
+      `承認された削除を実行しますか？\n\n` +
+      `年度: ${proposal.fiscal_year_name}\n` +
+      `承認数: ${proposal.approve_count}/${proposal.total_members}\n\n` +
+      `⚠️ この操作は取り消せません！`
+    )) {
+      return
+    }
+
+    try {
+      const fiscalYearId = proposal.fiscal_year_id
+      const fiscalYearName = proposal.fiscal_year_name
+
+      // 画像を削除
+      const { data: transactions } = await supabase
+        .from('transactions')
+        .select('receipt_image_url')
+        .eq('fiscal_year_id', fiscalYearId)
+
+      const imageUrls = transactions
+        ?.filter((t: any) => t.receipt_image_url)
+        .map((t: any) => {
+          const url = new URL(t.receipt_image_url)
+          return url.pathname.split('/').pop()
+        })
+        .filter(Boolean) || []
+
+      const transactionCount = transactions?.length || 0
+      const imageCount = imageUrls.length
+
+      if (imageUrls.length > 0) {
+        await supabase.storage
+          .from('receipts')
+          .remove(imageUrls as string[])
+      }
+
+      // 取引履歴を削除
+      const { data: txIds } = await supabase
+        .from('transactions')
+        .select('id')
+        .eq('fiscal_year_id', fiscalYearId)
+
+      const ids = txIds?.map(t => t.id) || []
+      const historyCount = ids.length
+
+      if (ids.length > 0) {
+        await supabase
+          .from('transaction_history')
+          .delete()
+          .in('transaction_id', ids)
+      }
+
+      // 取引を削除
+      await supabase
+        .from('transactions')
+        .delete()
+        .eq('fiscal_year_id', fiscalYearId)
+
+      // 年度を削除
+      await supabase
+        .from('fiscal_years')
+        .delete()
+        .eq('id', fiscalYearId)
+
+      // システム履歴に記録
+      await supabase.from('system_history').insert({
+        action_type: 'year_deleted',
+        target_type: 'fiscal_year',
+        target_id: String(fiscalYearId),
+        performed_by: userProfile.id,
+        details: {
+          fiscal_year_name: fiscalYearName,
+          deleted_transaction_count: transactionCount,
+          deleted_history_count: historyCount,
+          deleted_image_count: imageCount,
+          via_voting: true,
+          proposal_id: proposal.id,
+          votes_approve: proposal.approve_count,
+          votes_reject: proposal.reject_count,
+        },
+        description: `年度「${fiscalYearName}」のデータを完全削除しました（投票により承認、取引${transactionCount}件、履歴${historyCount}件、領収書${imageCount}枚）`,
+      })
+
+      // 提案のステータスを「executed」に更新
+      await supabase
+        .from('deletion_proposals')
+        .update({
+          status: 'executed',
+          executed_at: new Date().toISOString(),
+          executed_by: userProfile.id,
+        })
+        .eq('id', proposal.id)
+
+      alert('削除を実行しました')
+      await fetchDeletionProposals()
+
+      // 現在の年度を削除した場合はトップページへ
+      if (currentFiscalYear?.id === fiscalYearId) {
+        window.location.href = '/'
+      } else {
+        window.location.reload()
+      }
+    } catch (error) {
+      console.error('Error executing deletion:', error)
+      alert('エラーが発生しました')
     }
   }
 
@@ -577,6 +1036,13 @@ export default function SettingsPage() {
                 currentFiscalYear={currentFiscalYear}
                 onDeleteSuccess={refreshFiscalYears}
                 userProfile={userProfile}
+                deletionProposals={deletionProposals}
+                myVotes={myVotes}
+                onProposeDeletion={handleProposeDeletion}
+                onVote={handleVote}
+                onExecuteDeletion={handleExecuteDeletion}
+                onCancelProposal={handleCancelProposal}
+                onRefreshProposals={fetchDeletionProposals}
               />
             )}
           </div>
@@ -743,6 +1209,13 @@ function DataManagementView({
   currentFiscalYear,
   onDeleteSuccess,
   userProfile,
+  deletionProposals,
+  myVotes,
+  onProposeDeletion,
+  onVote,
+  onExecuteDeletion,
+  onCancelProposal,
+  onRefreshProposals,
 }: {
   storageUsage: StorageUsage | null
   loadingUsage: boolean
@@ -751,6 +1224,13 @@ function DataManagementView({
   currentFiscalYear: any
   onDeleteSuccess: () => void
   userProfile: any
+  deletionProposals: DeletionProposal[]
+  myVotes: Record<string, DeletionVote>
+  onProposeDeletion: (fiscalYearId: number, fiscalYearName: string) => Promise<void>
+  onVote: (proposalId: string, vote: 'approve' | 'reject') => Promise<void>
+  onExecuteDeletion: (proposal: DeletionProposal) => Promise<void>
+  onCancelProposal: (proposal: DeletionProposal) => Promise<void>
+  onRefreshProposals: () => Promise<void>
 }) {
   const [archiving, setArchiving] = useState<number | null>(null)
   const [deleting, setDeleting] = useState<number | null>(null)
@@ -1134,25 +1614,8 @@ function DataManagementView({
     }
   }
 
-  const handleDeleteFiscalYearData = async (fiscalYearId: number, fiscalYearName: string) => {
-    if (!confirm(
-      `${fiscalYearName}のデータを完全に削除しますか？\n\n` +
-      `削除されるデータ：\n` +
-      `- 全ての取引データ\n` +
-      `- 全ての履歴データ\n` +
-      `- 全ての領収書画像\n\n` +
-      `⚠️ この操作は取り消せません！\n` +
-      `事前にアーカイブを作成することを強く推奨します。`
-    )) {
-      return
-    }
-
-    if (!confirm('本当に削除しますか？最終確認です。')) {
-      return
-    }
-
-    setDeleting(fiscalYearId)
-
+  // 内部削除関数（確認なし）- 提案承認後に呼ばれる
+  const handleDeleteFiscalYearDataInternal = async (fiscalYearId: number, fiscalYearName: string) => {
     try {
       // 画像を削除
       const { data: transactions } = await supabase
@@ -1236,7 +1699,6 @@ function DataManagementView({
         })
       }
 
-      alert('データを削除しました')
       onDeleteSuccess()
       onRefreshUsage()
 
@@ -1245,9 +1707,7 @@ function DataManagementView({
       }
     } catch (error) {
       console.error('Error deleting:', error)
-      alert('エラーが発生しました')
-    } finally {
-      setDeleting(null)
+      throw error // エラーを呼び出し元に伝播
     }
   }
 
@@ -1334,6 +1794,151 @@ function DataManagementView({
         )}
       </div>
 
+      {/* 削除提案セクション */}
+      {deletionProposals.length > 0 && (
+        <div className="mb-6">
+          <h2 className="text-xl font-bold mb-4 text-gray-800">🗳️ 削除提案（投票）</h2>
+          <div className="space-y-4">
+            {deletionProposals.map((proposal) => {
+              const myVote = myVotes[proposal.id]
+              const hasVoted = !!myVote
+              const isExpired = new Date(proposal.expires_at) < new Date()
+              const expiresIn = Math.max(0, Math.floor((new Date(proposal.expires_at).getTime() - new Date().getTime()) / (1000 * 60 * 60)))
+
+              return (
+                <div
+                  key={proposal.id}
+                  className={`border-2 rounded-lg p-4 ${
+                    proposal.status === 'approved'
+                      ? 'border-green-500 bg-green-50'
+                      : proposal.status === 'rejected' || isExpired
+                      ? 'border-gray-300 bg-gray-50'
+                      : 'border-orange-500 bg-orange-50'
+                  }`}
+                >
+                  <div className="flex items-start justify-between mb-3">
+                    <div>
+                      <h3 className="font-bold text-lg text-gray-900">
+                        {proposal.fiscal_year_name} の削除
+                      </h3>
+                      <p className="text-sm text-gray-600">
+                        提案者: {proposal.proposer_name} • {new Date(proposal.proposed_at).toLocaleDateString('ja-JP')}
+                      </p>
+                    </div>
+                    <span
+                      className={`px-3 py-1 rounded-full text-xs font-bold ${
+                        proposal.status === 'approved'
+                          ? 'bg-green-200 text-green-800'
+                          : proposal.status === 'rejected'
+                          ? 'bg-red-200 text-red-800'
+                          : isExpired
+                          ? 'bg-gray-200 text-gray-800'
+                          : 'bg-orange-200 text-orange-800'
+                      }`}
+                    >
+                      {proposal.status === 'approved'
+                        ? '✅ 承認済み'
+                        : proposal.status === 'rejected'
+                        ? '❌ 却下'
+                        : isExpired
+                        ? '⏰ 期限切れ'
+                        : '📋 投票中'}
+                    </span>
+                  </div>
+
+                  {/* 投票状況 */}
+                  <div className="mb-3">
+                    <div className="flex items-center gap-4 text-sm">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold">賛成:</span>
+                        <span className="text-green-600 font-bold">{proposal.approve_count}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold">反対:</span>
+                        <span className="text-red-600 font-bold">{proposal.reject_count}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold">必要:</span>
+                        <span className="text-gray-700 font-bold">
+                          {proposal.required_approvals}/{proposal.total_members}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="mt-2 bg-gray-200 rounded-full h-2">
+                      <div
+                        className="bg-green-500 h-2 rounded-full transition-all"
+                        style={{
+                          width: `${Math.min(100, (proposal.approve_count / proposal.required_approvals) * 100)}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* 期限表示 */}
+                  {proposal.status === 'pending' && !isExpired && (
+                    <p className="text-xs text-gray-600 mb-3">
+                      ⏰ 残り約 {expiresIn} 時間
+                    </p>
+                  )}
+
+                  {/* 投票ボタン or ステータス */}
+                  {proposal.status === 'pending' && !isExpired && (
+                    <div className="space-y-2">
+                      {hasVoted && (
+                        <div className="text-xs text-gray-600 bg-white px-3 py-1 rounded border border-gray-300 text-center">
+                          現在の投票: {myVote.vote === 'approve' ? '✅ 賛成' : '❌ 反対'}
+                          <span className="text-gray-500 ml-1">（変更可能）</span>
+                        </div>
+                      )}
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => onVote(proposal.id, 'approve')}
+                          className={`flex-1 font-bold py-2 px-4 rounded transition ${
+                            hasVoted && myVote.vote === 'approve'
+                              ? 'bg-green-600 text-white border-2 border-green-700'
+                              : 'bg-green-500 hover:bg-green-600 text-white'
+                          }`}
+                        >
+                          ✅ 賛成
+                        </button>
+                        <button
+                          onClick={() => onVote(proposal.id, 'reject')}
+                          className={`flex-1 font-bold py-2 px-4 rounded transition ${
+                            hasVoted && myVote.vote === 'reject'
+                              ? 'bg-red-600 text-white border-2 border-red-700'
+                              : 'bg-red-500 hover:bg-red-600 text-white'
+                          }`}
+                        >
+                          ❌ 反対
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 承認済み - 削除実行ボタンとキャンセルボタン */}
+                  {proposal.status === 'approved' && (
+                    <div className="space-y-2">
+                      <button
+                        onClick={() => onExecuteDeletion(proposal)}
+                        className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded transition"
+                      >
+                        🗑️ 削除を実行する
+                      </button>
+                      <button
+                        onClick={() => onCancelProposal(proposal)}
+                        className="w-full bg-gray-400 hover:bg-gray-500 text-white text-sm py-1.5 px-3 rounded transition"
+                      >
+                        ↩️ 提案をキャンセル（保留に戻す）
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       {/* アーカイブと削除 */}
       <div>
         <h2 className="text-xl font-bold mb-4 text-gray-800">年度別データ管理</h2>
@@ -1377,15 +1982,35 @@ function DataManagementView({
                     {archiving === fy.id ? '処理中...' : '📦 アーカイブ'}
                   </button>
 
-                  {allFiscalYears.length > 1 && fy.id !== currentFiscalYear?.id && (
-                    <button
-                      onClick={() => handleDeleteFiscalYearData(fy.id, fy.name)}
-                      disabled={deleting === fy.id}
-                      className="w-full sm:w-auto px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded font-bold text-sm disabled:bg-gray-400"
-                    >
-                      {deleting === fy.id ? '削除中...' : '🗑️ 完全削除'}
-                    </button>
-                  )}
+                  {allFiscalYears.length > 1 && fy.id !== currentFiscalYear?.id && (() => {
+                    // この年度の既存提案を確認
+                    const existingProposal = deletionProposals.find(
+                      p => p.fiscal_year_id === fy.id && ['pending', 'approved'].includes(p.status)
+                    )
+                    const hasActiveProposal = !!existingProposal
+
+                    return (
+                      <div className="relative">
+                        <button
+                          onClick={() => onProposeDeletion(fy.id, fy.name)}
+                          disabled={hasActiveProposal}
+                          className={`w-full sm:w-auto px-4 py-2 rounded font-bold text-sm ${
+                            hasActiveProposal
+                              ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                              : 'bg-orange-500 hover:bg-orange-600 text-white'
+                          }`}
+                          title={hasActiveProposal ? '既に削除提案が存在します' : ''}
+                        >
+                          📋 削除を提案
+                        </button>
+                        {hasActiveProposal && (
+                          <p className="text-xs text-gray-500 mt-1">
+                            提案中（{existingProposal.status === 'approved' ? '承認済み' : '投票中'}）
+                          </p>
+                        )}
+                      </div>
+                    )
+                  })()}
                 </div>
               </div>
             </div>
