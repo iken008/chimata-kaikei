@@ -26,14 +26,6 @@ export const metadata: Metadata = {
   formatDetection: {
     telephone: false,
   },
-  icons: {
-    icon: [
-      { url: '/icon.svg', type: 'image/svg+xml' },
-    ],
-    apple: [
-      { url: '/apple-icon.svg', type: 'image/svg+xml' },
-    ],
-  },
   manifest: "/manifest.json",
 };
 
