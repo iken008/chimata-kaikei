@@ -28,7 +28,7 @@ type HistoryRecord = {
 
 export default function HistoryPage() {
   const router = useRouter()
-  const { currentFiscalYear } = useFiscalYear()
+  const { currentFiscalYear, isPastYear } = useFiscalYear()
   const { userProfile } = useAuth()
   const [history, setHistory] = useState<HistoryRecord[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
@@ -267,7 +267,11 @@ export default function HistoryPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center">
+      <div className={`min-h-screen flex items-center justify-center ${
+        isPastYear
+          ? 'bg-gradient-to-br from-gray-200 to-gray-300'
+          : 'bg-gradient-to-br from-gray-50 to-gray-100'
+      }`}>
         <p className="text-xl text-gray-600">読み込み中...</p>
       </div>
     )
@@ -275,7 +279,11 @@ export default function HistoryPage() {
 
   return (
     <ProtectedRoute>
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
+    <div className={`min-h-screen ${
+      isPastYear
+        ? 'bg-gradient-to-br from-gray-200 to-gray-300'
+        : 'bg-gradient-to-br from-gray-50 to-gray-100'
+    }`}>
       <Header
         title="操作履歴"
         subtitle="全ての操作を透明に記録"

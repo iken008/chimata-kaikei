@@ -8,6 +8,7 @@ import Image from 'next/image'
 import imageCompression from 'browser-image-compression'
 import ProtectedRoute from '@/app/components/ProtectedRoute'
 import { useAuth } from '@/app/contexts/AuthContext'
+import { useFiscalYear } from '@/app/contexts/FiscalYearContext'
 
 type Transaction = {
   id: string
@@ -27,6 +28,7 @@ export default function EditPage() {
   const id = params.id as string
 
   const { userProfile } = useAuth()
+  const { isPastYear } = useFiscalYear()
 
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -287,7 +289,11 @@ export default function EditPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center">
+      <div className={`min-h-screen flex items-center justify-center ${
+        isPastYear
+          ? 'bg-gradient-to-br from-gray-200 to-gray-300'
+          : 'bg-gradient-to-br from-gray-50 to-gray-100'
+      }`}>
         <p className="text-xl text-gray-600">読み込み中...</p>
       </div>
     )
@@ -295,7 +301,11 @@ export default function EditPage() {
 
   if (!transaction) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center">
+      <div className={`min-h-screen flex items-center justify-center ${
+        isPastYear
+          ? 'bg-gradient-to-br from-gray-200 to-gray-300'
+          : 'bg-gradient-to-br from-gray-50 to-gray-100'
+      }`}>
         <p className="text-xl text-gray-600">取引が見つかりません</p>
       </div>
     )
@@ -303,7 +313,11 @@ export default function EditPage() {
 
   return (
     <ProtectedRoute>
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
+    <div className={`min-h-screen ${
+      isPastYear
+        ? 'bg-gradient-to-br from-gray-200 to-gray-300'
+        : 'bg-gradient-to-br from-gray-50 to-gray-100'
+    }`}>
       <Header
         title="取引を編集"
         subtitle="変更内容は履歴に記録されます"

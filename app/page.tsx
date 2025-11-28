@@ -28,10 +28,11 @@ type Transaction = {
 }
 
 export default function Home() {
-  const { currentFiscalYear, loading: fiscalYearLoading } = useFiscalYear()
+  const { currentFiscalYear, loading: fiscalYearLoading, isPastYear } = useFiscalYear()
   const [accounts, setAccounts] = useState<Account[]>([])
   const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([])
   const [monthlyStats, setMonthlyStats] = useState({ income: 0, expense: 0 })
+  const [yearlyStats, setYearlyStats] = useState({ income: 0, expense: 0 })
   const [loading, setLoading] = useState(true)
   const [storageUsage, setStorageUsage] = useState<{ used: number; limit: number; percentage: number } | null>(null)
 
@@ -185,6 +186,21 @@ export default function Home() {
       )
 
       setMonthlyStats(stats)
+
+      // 年度全体の収支を計算（allTransactionsから）
+      const yearlyStatsCalc = (allTransactions || []).reduce(
+        (acc, t) => {
+          if (t.type === 'income') {
+            acc.income += Number(t.amount)
+          } else if (t.type === 'expense') {
+            acc.expense += Number(t.amount)
+          }
+          return acc
+        },
+        { income: 0, expense: 0 }
+      )
+
+      setYearlyStats(yearlyStatsCalc)
     } catch (error) {
       console.error('Error fetching data:', error)
     } finally {
@@ -227,10 +243,19 @@ export default function Home() {
 
   const totalBalance = accounts.reduce((sum, account) => sum + Number(account.balance), 0)
   const monthlyBalance = monthlyStats.income - monthlyStats.expense
+  const yearlyBalance = yearlyStats.income - yearlyStats.expense
+
+  // 過去年度か現在年度かで表示するデータを切り替え
+  const displayStats = isPastYear ? yearlyStats : monthlyStats
+  const displayBalance = isPastYear ? yearlyBalance : monthlyBalance
 
   if (loading || fiscalYearLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center">
+      <div className={`min-h-screen flex items-center justify-center ${
+        isPastYear
+          ? 'bg-gradient-to-br from-gray-200 to-gray-300'
+          : 'bg-gradient-to-br from-gray-50 to-gray-100'
+      }`}>
         <p className="text-xl text-gray-600">読み込み中...</p>
       </div>
     )
@@ -238,7 +263,11 @@ export default function Home() {
 
   return (
     <ProtectedRoute>
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
+    <div className={`min-h-screen ${
+      isPastYear
+        ? 'bg-gradient-to-br from-gray-200 to-gray-300'
+        : 'bg-gradient-to-br from-gray-50 to-gray-100'
+    }`}>
       {/* ヘッダー */}
       <Header
         title="ちまたの会計 mini"
@@ -271,10 +300,16 @@ export default function Home() {
           </div>
         )}
         {/* 残高表示 */}
-        <div className="bg-white rounded-xl shadow-md p-6 mb-6 border border-gray-100">
+        <div className={`rounded-xl shadow-md p-6 mb-6 border ${
+          isPastYear
+            ? 'bg-gray-100 border-gray-200'
+            : 'bg-white border-gray-100'
+        }`}>
           <div className="flex items-center mb-4">
             <span className="text-2xl mr-2">💰</span>
-            <h2 className="text-xl font-bold text-gray-800">現在の残高</h2>
+            <h2 className="text-xl font-bold text-gray-800">
+              {isPastYear ? `${currentFiscalYear?.name}の残高` : '現在の残高'}
+            </h2>
           </div>
           <div className="space-y-3">
             {currentFiscalYear && (
@@ -287,15 +322,15 @@ export default function Home() {
               </div>
             )}
             {accounts.map((account) => (
-              <div key={account.id} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
-                <span className="text-gray-600 font-medium">{account.name}:</span>
-                <span className="text-2xl font-bold text-gray-900">{formatCurrency(Number(account.balance))}</span>
+              <div key={account.id} className="flex justify-between items-center p-2 md:p-3 bg-gray-50 rounded-lg">
+                <span className="text-sm md:text-base text-gray-600 font-medium">{account.name}:</span>
+                <span className="text-lg md:text-2xl font-bold text-gray-900">{formatCurrency(Number(account.balance))}</span>
               </div>
             ))}
-            <div className="border-t pt-3 mt-3">
-              <div className="flex justify-between items-center p-3 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg">
-                <span className="text-gray-800 font-bold text-lg">合計:</span>
-                <span className="text-3xl font-bold text-indigo-600">
+            <div className="border-t pt-2 md:pt-3 mt-2 md:mt-3">
+              <div className="flex justify-between items-center p-2 md:p-3 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg">
+                <span className="text-gray-800 font-bold text-base md:text-lg">合計:</span>
+                <span className="text-xl md:text-3xl font-bold text-indigo-600">
                   {formatCurrency(totalBalance)}
                 </span>
               </div>
@@ -304,31 +339,37 @@ export default function Home() {
         </div>
 
         {/* 今月の収支 */}
-        <div className="bg-white rounded-xl shadow-md p-4 sm:p-6 mb-6 border border-gray-100">
+        <div className={`rounded-xl shadow-md p-4 sm:p-6 mb-6 border ${
+          isPastYear
+            ? 'bg-gray-100 border-gray-200'
+            : 'bg-white border-gray-100'
+        }`}>
           <div className="flex items-center mb-4">
             <span className="text-xl sm:text-2xl mr-2">📊</span>
-            <h2 className="text-lg sm:text-xl font-bold text-gray-800">今月の収支</h2>
+            <h2 className="text-lg sm:text-xl font-bold text-gray-800">
+              {isPastYear ? `${currentFiscalYear?.name}の収支` : '今月の収支'}
+            </h2>
           </div>
           <div className="grid grid-cols-3 gap-2 sm:gap-4">
             <div className="text-center p-2 sm:p-4 bg-emerald-50 rounded-lg">
               <p className="text-xs sm:text-sm text-emerald-600 font-semibold mb-1 sm:mb-2">収入</p>
               <p className="text-sm sm:text-2xl font-bold text-emerald-600">
-                +{formatCurrency(monthlyStats.income)}
+                +{formatCurrency(displayStats.income)}
               </p>
             </div>
             <div className="text-center p-2 sm:p-4 bg-rose-50 rounded-lg">
               <p className="text-xs sm:text-sm text-rose-600 font-semibold mb-1 sm:mb-2">支出</p>
               <p className="text-sm sm:text-2xl font-bold text-rose-600">
-                -{formatCurrency(monthlyStats.expense)}
+                -{formatCurrency(displayStats.expense)}
               </p>
             </div>
             <div className="text-center p-2 sm:p-4 bg-indigo-50 rounded-lg">
               <p className="text-xs sm:text-sm text-indigo-600 font-semibold mb-1 sm:mb-2">収支</p>
               <p className={`text-sm sm:text-2xl font-bold ${
-                monthlyBalance >= 0 ? 'text-indigo-600' : 'text-rose-600'
+                displayBalance >= 0 ? 'text-indigo-600' : 'text-rose-600'
               }`}>
-                {monthlyBalance >= 0 ? '+' : ''}
-                {formatCurrency(monthlyBalance)}
+                {displayBalance >= 0 ? '+' : ''}
+                {formatCurrency(displayBalance)}
               </p>
             </div>
           </div>
@@ -357,10 +398,16 @@ export default function Home() {
         </div>
 
         {/* 最近の取引 */}
-        <div className="bg-white rounded-xl shadow-md p-6 border border-gray-100">
+        <div className={`rounded-xl shadow-md p-6 border ${
+          isPastYear
+            ? 'bg-gray-100 border-gray-200'
+            : 'bg-white border-gray-100'
+        }`}>
           <div className="flex items-center mb-4">
             <span className="text-2xl mr-2">🕐</span>
-            <h2 className="text-xl font-bold text-gray-800">最近の取引</h2>
+            <h2 className="text-xl font-bold text-gray-800">
+              {isPastYear ? '過去の取引' : '最近の取引'}
+            </h2>
           </div>
           {recentTransactions.length === 0 ? (
             <p className="text-gray-500 text-center py-8">まだ取引がありません</p>
