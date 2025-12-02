@@ -15,11 +15,19 @@ type Transaction = {
   type: string
   amount: number
   description: string
+  category: string | null
   account_id: number | null
   from_account_id: number | null
   to_account_id: number | null
   receipt_image_url: string | null
   recorded_by: string
+}
+
+type Category = {
+  id: number
+  name: string
+  type: 'income' | 'expense'
+  sort_order: number
 }
 
 export default function EditPage() {
@@ -28,15 +36,18 @@ export default function EditPage() {
   const id = params.id as string
 
   const { userProfile } = useAuth()
-  const { isPastYear } = useFiscalYear()
+  const { currentFiscalYear, isPastYear } = useFiscalYear()
 
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [transaction, setTransaction] = useState<Transaction | null>(null)
-  
+
   const [type, setType] = useState<'income' | 'expense' | 'transfer'>('expense')
   const [amount, setAmount] = useState('')
   const [description, setDescription] = useState('')
+  const [category, setCategory] = useState('')
+  const [incomeCategories, setIncomeCategories] = useState<Category[]>([])
+  const [expenseCategories, setExpenseCategories] = useState<Category[]>([])
   const [accountId, setAccountId] = useState('1')
   const [fromAccountId, setFromAccountId] = useState('1')
   const [toAccountId, setToAccountId] = useState('2')
@@ -47,6 +58,33 @@ export default function EditPage() {
   useEffect(() => {
     fetchTransaction()
   }, [id])
+
+  useEffect(() => {
+    if (currentFiscalYear) {
+      fetchCategories()
+    }
+  }, [currentFiscalYear])
+
+  const fetchCategories = async () => {
+    if (!currentFiscalYear) return
+
+    const { data, error } = await supabase
+      .from('categories')
+      .select('*')
+      .eq('fiscal_year_id', currentFiscalYear.id)
+      .order('sort_order')
+
+    if (error) {
+      console.error('Error fetching categories:', error)
+      return
+    }
+
+    const income = data?.filter(c => c.type === 'income') || []
+    const expense = data?.filter(c => c.type === 'expense') || []
+
+    setIncomeCategories(income)
+    setExpenseCategories(expense)
+  }
 
   const fetchTransaction = async () => {
     try {
@@ -62,6 +100,7 @@ export default function EditPage() {
       setType(data.type)
       setAmount(data.amount.toString())
       setDescription(data.description)
+      setCategory(data.category || '')
       setAccountId(data.account_id?.toString() || '1')
       setFromAccountId(data.from_account_id?.toString() || '1')
       setToAccountId(data.to_account_id?.toString() || '2')
@@ -184,6 +223,7 @@ export default function EditPage() {
         type,
         amount: parseFloat(amount),
         description,
+        category: type === 'transfer' ? null : category,
         receipt_image_url: imageUrl,
       }
 
@@ -202,6 +242,7 @@ export default function EditPage() {
         oldData.type !== newTransactionData.type ||
         oldData.amount !== newTransactionData.amount ||
         oldData.description !== newTransactionData.description ||
+        oldData.category !== newTransactionData.category ||
         oldData.receipt_image_url !== newTransactionData.receipt_image_url ||
         oldData.account_id !== newTransactionData.account_id ||
         oldData.from_account_id !== newTransactionData.from_account_id ||
@@ -391,6 +432,30 @@ export default function EditPage() {
               required
             />
           </div>
+
+          {/* カテゴリー選択 */}
+          {type !== 'transfer' && (
+            <div className="mb-6">
+              <label className="block text-gray-700 font-bold mb-2">カテゴリー</label>
+              <select
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                className="w-full p-3 border border-gray-300 rounded-lg"
+              >
+                <option value="">選択してください</option>
+                {type === 'income' && incomeCategories.map((cat) => (
+                  <option key={cat.id} value={cat.name}>
+                    {cat.name}
+                  </option>
+                ))}
+                {type === 'expense' && expenseCategories.map((cat) => (
+                  <option key={cat.id} value={cat.name}>
+                    {cat.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* 口座選択 */}
           {type !== 'transfer' && (

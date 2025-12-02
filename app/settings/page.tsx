@@ -41,7 +41,7 @@ type DeletionProposal = {
   proposed_by: string
   proposed_at: string
   status: 'pending' | 'approved' | 'rejected' | 'expired' | 'executed'
-  expires_at: string
+  expires_at?: string  // オプショナル（既存の古い提案には存在しない場合がある）
   total_members: number
   required_approvals: number
   approve_count: number
@@ -204,7 +204,7 @@ export default function SettingsPage() {
           *,
           proposer:users!deletion_proposals_proposed_by_fkey(name)
         `)
-        .in('status', ['pending', 'approved'])
+        .in('status', ['pending', 'approved', 'expired'])
         .order('proposed_at', { ascending: false })
 
       if (error) throw error
@@ -466,6 +466,58 @@ export default function SettingsPage() {
     } catch (error) {
       console.error('Error cancelling proposal:', error)
       alert('エラーが発生しました')
+    }
+  }
+
+  // 期限切れ提案を削除
+  const handleDeleteExpiredProposal = async (proposal: DeletionProposal) => {
+    if (!userProfile) return
+
+    if (!confirm(
+      `期限切れの提案を削除しますか？\n\n` +
+      `年度: ${proposal.fiscal_year_name}\n` +
+      `提案者: ${proposal.proposer_name}\n` +
+      `提案日: ${new Date(proposal.proposed_at).toLocaleDateString('ja-JP')}\n\n` +
+      `※ 提案のみ削除され、年度データは残ります。`
+    )) {
+      return
+    }
+
+    try {
+      const { error } = await supabase
+        .from('deletion_proposals')
+        .delete()
+        .eq('id', proposal.id)
+
+      if (error) throw error
+
+      // システム履歴に記録（エラーが発生しても画面更新は実行する）
+      try {
+        await supabase.from('system_history').insert({
+          action_type: 'proposal_deleted',
+          target_type: 'fiscal_year',
+          target_id: String(proposal.fiscal_year_id),
+          performed_by: userProfile.id,
+          details: {
+            fiscal_year_name: proposal.fiscal_year_name,
+            proposal_id: proposal.id,
+            reason: 'expired',
+            votes_approve: proposal.approve_count,
+            votes_reject: proposal.reject_count,
+          },
+          description: `年度「${proposal.fiscal_year_name}」の期限切れ削除提案を削除しました`,
+        })
+      } catch (historyError) {
+        console.error('Error recording history:', historyError)
+      }
+
+      alert('期限切れの提案を削除しました')
+    } catch (error) {
+      console.error('Error deleting expired proposal:', error)
+      alert('エラーが発生しました')
+    } finally {
+      // 削除が成功した場合は必ずリストを更新
+      await fetchDeletionProposals()
     }
   }
 
@@ -1046,6 +1098,7 @@ export default function SettingsPage() {
                 onVote={handleVote}
                 onExecuteDeletion={handleExecuteDeletion}
                 onCancelProposal={handleCancelProposal}
+                onDeleteExpiredProposal={handleDeleteExpiredProposal}
                 onRefreshProposals={fetchDeletionProposals}
               />
             )}
@@ -1219,6 +1272,7 @@ function DataManagementView({
   onVote,
   onExecuteDeletion,
   onCancelProposal,
+  onDeleteExpiredProposal,
   onRefreshProposals,
 }: {
   storageUsage: StorageUsage | null
@@ -1234,6 +1288,7 @@ function DataManagementView({
   onVote: (proposalId: string, vote: 'approve' | 'reject') => Promise<void>
   onExecuteDeletion: (proposal: DeletionProposal) => Promise<void>
   onCancelProposal: (proposal: DeletionProposal) => Promise<void>
+  onDeleteExpiredProposal: (proposal: DeletionProposal) => Promise<void>
   onRefreshProposals: () => Promise<void>
 }) {
   const [archiving, setArchiving] = useState<number | null>(null)
@@ -1806,8 +1861,11 @@ function DataManagementView({
             {deletionProposals.map((proposal) => {
               const myVote = myVotes[proposal.id]
               const hasVoted = !!myVote
-              const isExpired = new Date(proposal.expires_at) < new Date()
-              const expiresIn = Math.max(0, Math.floor((new Date(proposal.expires_at).getTime() - new Date().getTime()) / (1000 * 60 * 60)))
+              // expires_atがない場合は期限切れとして扱う（既存の古い提案対応）
+              const isExpired = !proposal.expires_at || new Date(proposal.expires_at) < new Date()
+              const expiresIn = proposal.expires_at
+                ? Math.max(0, Math.floor((new Date(proposal.expires_at).getTime() - new Date().getTime()) / (1000 * 60 * 60)))
+                : 0
 
               return (
                 <div
@@ -1936,6 +1994,16 @@ function DataManagementView({
                       </button>
                     </div>
                   )}
+
+                  {/* 期限切れ - 提案削除ボタン（承認済み以外の期限切れ提案すべて） */}
+                  {proposal.status !== 'approved' && isExpired && (
+                    <button
+                      onClick={() => onDeleteExpiredProposal(proposal)}
+                      className="w-full bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded transition"
+                    >
+                      🗑️ この提案を削除
+                    </button>
+                  )}
                 </div>
               )
             })}
@@ -1991,7 +2059,9 @@ function DataManagementView({
                     const existingProposal = deletionProposals.find(
                       p => p.fiscal_year_id === fy.id && ['pending', 'approved'].includes(p.status)
                     )
-                    const hasActiveProposal = !!existingProposal
+                    // 期限切れもチェック（expires_atがない場合も期限切れとして扱う）
+                    const isProposalExpired = existingProposal ? (!existingProposal.expires_at || new Date(existingProposal.expires_at) < new Date()) : false
+                    const hasActiveProposal = existingProposal && !isProposalExpired
 
                     return (
                       <div className="relative">
