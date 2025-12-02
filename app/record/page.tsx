@@ -216,12 +216,15 @@ export default function RecordPage() {
       const userId = userProfile.id
 
       // 取引を記録
+      // transactionDate（YYYY-MM-DD）と現在時刻を組み合わせる
+      const recordedDateTime = new Date(transactionDate + 'T' + new Date().toTimeString().split(' ')[0])
+
       const transactionData: any = {
         type,
         amount: parseFloat(amount),
         description,
         category: type === 'transfer' ? null : category,
-        recorded_at: transactionDate,
+        recorded_at: recordedDateTime.toISOString(),
         recorded_by: userId,
         receipt_image_url: imageUrl,
         fiscal_year_id: currentFiscalYear?.id,

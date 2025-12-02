@@ -804,9 +804,10 @@ function CategoryLedgerView({
                     fill="#8884d8"
                     dataKey="value"
                     style={{ outline: 'none' }}
+                    activeShape={false}
                   >
                     {incomePieData.map((entry: any, index: number) => (
-                      <Cell key={`cell-${index}`} fill={INCOME_COLORS[index % INCOME_COLORS.length]} />
+                      <Cell key={`cell-${index}`} fill={INCOME_COLORS[index % INCOME_COLORS.length]} style={{ outline: 'none' }} />
                     ))}
                   </Pie>
                   <Tooltip content={<IncomeTooltip />} />
@@ -861,9 +862,10 @@ function CategoryLedgerView({
                     fill="#8884d8"
                     dataKey="value"
                     style={{ outline: 'none' }}
+                    activeShape={false}
                   >
                     {expensePieData.map((entry: any, index: number) => (
-                      <Cell key={`cell-${index}`} fill={EXPENSE_COLORS[index % EXPENSE_COLORS.length]} />
+                      <Cell key={`cell-${index}`} fill={EXPENSE_COLORS[index % EXPENSE_COLORS.length]} style={{ outline: 'none' }} />
                     ))}
                   </Pie>
                   <Tooltip content={<ExpenseTooltip />} />

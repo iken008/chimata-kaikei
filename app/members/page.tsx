@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import ProtectedRoute from '../components/ProtectedRoute'
 import Header from '../components/Header'
+import { QRCodeSVG } from 'qrcode.react'
 
 type Member = {
   id: string
@@ -34,9 +35,18 @@ export default function MembersPage() {
   const [inviteCodes, setInviteCodes] = useState<InviteCode[]>([])
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
+  const [loginUrl, setLoginUrl] = useState('')
+  const [isQRModalOpen, setIsQRModalOpen] = useState(false)
 
   useEffect(() => {
     fetchData()
+  }, [])
+
+  // ログインURLを設定
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setLoginUrl(`${window.location.origin}/login`)
+    }
   }, [])
 
   // 新規ユーザー登録のリアルタイム監視
@@ -383,6 +393,29 @@ export default function MembersPage() {
           showBack={true}
           colorFrom="indigo-500"
           colorTo="purple-500"
+          rightContent={
+            loginUrl && (
+              <button
+                onClick={() => setIsQRModalOpen(true)}
+                className="p-2 hover:bg-white/20 rounded-lg transition"
+                title="ログインQRコード"
+              >
+                <svg
+                  className="w-8 h-8 text-white"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                  strokeWidth={2}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M3 7h4v4H3V7zm0 6h4v4H3v-4zm6-6h4v4H9V7zm0 6h4v4H9v-4zm6-6h4v4h-4V7zm0 6h4v4h-4v-4zM3 17h4v4H3v-4zm12 0h4v4h-4v-4z"
+                  />
+                </svg>
+              </button>
+            )
+          }
         />
 
         <main className="container mx-auto p-4 max-w-4xl">
@@ -564,11 +597,59 @@ export default function MembersPage() {
             </ol>
             <p className="text-xs text-blue-700 mt-2">
               ※ 招待コードの有効期限は1時間です<br />
-              ※ 有効期限が過ぎたコードは自動削除されます（使用済み・未使用問わず）
             </p>
           </div>
         </main>
       </div>
+
+      {/* QRコードモーダル */}
+      {isQRModalOpen && loginUrl && (
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+          onClick={() => setIsQRModalOpen(false)}
+        >
+          <div
+            className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-2xl font-bold text-gray-800">ログインQRコード</h2>
+              <button
+                onClick={() => setIsQRModalOpen(false)}
+                className="text-gray-400 hover:text-gray-600 text-3xl leading-none"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="flex flex-col items-center">
+              <div className="bg-white p-6 rounded-lg border-2 border-gray-200 mb-4">
+                <QRCodeSVG
+                  value={loginUrl}
+                  size={256}
+                  level="H"
+                  includeMargin={true}
+                />
+              </div>
+              <p className="text-sm text-gray-600 text-center mb-3">
+                新しいメンバーにQRコードをスキャンしてもらい、
+                <br />
+                ログイン画面にアクセスしてもらいましょう
+              </p>
+              <p className="text-xs text-gray-500 text-center font-mono bg-gray-50 px-4 py-2 rounded break-all">
+                {loginUrl}
+              </p>
+            </div>
+
+            <button
+              onClick={() => setIsQRModalOpen(false)}
+              className="w-full mt-6 px-4 py-3 bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white rounded-lg font-bold transition"
+            >
+              閉じる
+            </button>
+          </div>
+        </div>
+      )}
     </ProtectedRoute>
   )
 }

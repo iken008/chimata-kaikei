@@ -14,6 +14,7 @@ type HeaderProps = {
   backPath?: string
   colorFrom?: string
   colorTo?: string
+  rightContent?: React.ReactNode
 }
 
 export default function Header({
@@ -23,6 +24,7 @@ export default function Header({
   backPath = '/',
   colorFrom = 'indigo-500',
   colorTo = 'purple-500',
+  rightContent,
 }: HeaderProps) {
   const router = useRouter()
   const { currentFiscalYear, allFiscalYears, setCurrentFiscalYear, refreshFiscalYears, loading } = useFiscalYear()
@@ -268,19 +270,28 @@ export default function Header({
           </div>
 
           {/* タイトルバー */}
-          <div className="flex items-center p-4">
-            {showBack && (
-              <button
-                onClick={() => router.push(backPath)}
-                className="mr-4 text-2xl hover:bg-white/20 rounded-lg p-2 transition"
-              >
-                ←
-              </button>
-            )}
-            <div>
-              <h1 className="text-2xl font-bold">{title}</h1>
-              {subtitle && <p className="text-white/80 text-sm mt-1">{subtitle}</p>}
+          <div className="flex items-center justify-between p-4">
+            <div className="flex items-center flex-1">
+              {showBack && (
+                <button
+                  onClick={() => router.push(backPath)}
+                  className="mr-4 text-2xl hover:bg-white/20 rounded-lg p-2 transition"
+                >
+                  ←
+                </button>
+              )}
+              <div>
+                <h1 className="text-2xl font-bold">{title}</h1>
+                {subtitle && <p className="text-white/80 text-sm mt-1">{subtitle}</p>}
+              </div>
             </div>
+
+            {/* 右側コンテンツ */}
+            {rightContent && (
+              <div className="ml-4">
+                {rightContent}
+              </div>
+            )}
           </div>
         </div>
       </header>
