@@ -2051,7 +2051,7 @@ function DataManagementView({
                     disabled={archiving === fy.id}
                     className="w-full sm:w-auto px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded font-bold text-sm disabled:bg-gray-400"
                   >
-                    {archiving === fy.id ? '処理中...' : '📦 アーカイブ'}
+                    {archiving === fy.id ? '処理中...' : <><span className="hidden sm:inline">📦 </span>アーカイブ</>}
                   </button>
 
                   {allFiscalYears.length > 1 && fy.id !== currentFiscalYear?.id && (() => {
@@ -2075,7 +2075,7 @@ function DataManagementView({
                           }`}
                           title={hasActiveProposal ? '既に削除提案が存在します' : ''}
                         >
-                          📋 削除を提案
+                          <span className="hidden sm:inline">📋 </span>削除を提案
                         </button>
                         {hasActiveProposal && (
                           <p className="text-xs text-gray-500 mt-1">

@@ -688,6 +688,18 @@ function CategoryLedgerView({
   categorySummary,
   formatCurrency,
 }: any) {
+  // スマホ判定用のstate
+  const [isMobile, setIsMobile] = useState(false)
+
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768)
+    }
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    return () => window.removeEventListener('resize', checkMobile)
+  }, [])
+
   // 円グラフ用の色（見やすさを重視した濃い色）
   const INCOME_COLORS = [
     '#059669', // 濃い緑
@@ -723,14 +735,34 @@ function CategoryLedgerView({
   const incomeTotal = incomePieData.reduce((sum: number, item: any) => sum + item.value, 0)
   const expenseTotal = expensePieData.reduce((sum: number, item: any) => sum + item.value, 0)
 
-  // カスタムラベル（2行表示）
+  // カスタムラベル（3文字以下は1行、4文字以上は2行、小さいスライスは非表示）
   const renderCustomLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, name, percent }: any) => {
     const RADIAN = Math.PI / 180
-    const radius = outerRadius + 10
+    const radius = outerRadius + (isMobile ? 20 : 15)  // スマホは離す、PCは近め
     const x = cx + radius * Math.cos(-midAngle * RADIAN)
     const y = cy + radius * Math.sin(-midAngle * RADIAN)
     const percentage = percent ? (percent * 100).toFixed(0) : 0
 
+    // 5%未満の小さいスライスはラベルを表示しない（重なり防止）
+    if (percent < 0.05) return null
+
+    // カテゴリー名が3文字以下なら1行表示
+    if (name.length <= 3) {
+      return (
+        <text
+          x={x}
+          y={y}
+          fill="black"
+          textAnchor={x > cx ? 'start' : 'end'}
+          dominantBaseline="central"
+          style={{ fontSize: '10px', fontWeight: 'bold' }}
+        >
+          <tspan x={x} dy="0">{name} {percentage}%</tspan>
+        </text>
+      )
+    }
+
+    // 4文字以上は2行表示
     return (
       <text
         x={x}
@@ -790,9 +822,9 @@ function CategoryLedgerView({
         ) : (
           <div className="space-y-6">
             {/* 円グラフ */}
-            <div className="bg-gradient-to-br from-emerald-50/50 to-green-50/50 rounded-lg p-4 md:p-6 border border-emerald-200">
+            <div className="bg-gradient-to-br from-emerald-50/50 to-green-50/50 rounded-lg p-4 md:p-6 border border-emerald-200 outline-none focus:outline-none [&_*]:outline-none [&_*]:focus:outline-none">
               <h3 className="text-base md:text-lg font-bold text-emerald-800 mb-4 text-center">収入の内訳</h3>
-              <ResponsiveContainer width="100%" height={280}>
+              <ResponsiveContainer width="100%" height={isMobile ? 300 : 280}>
                 <PieChart>
                   <Pie
                     data={incomePieData}
@@ -800,7 +832,7 @@ function CategoryLedgerView({
                     cy="50%"
                     labelLine={false}
                     label={renderCustomLabel}
-                    outerRadius={60}
+                    outerRadius={isMobile ? 50 : 65}
                     fill="#8884d8"
                     dataKey="value"
                     style={{ outline: 'none' }}
@@ -811,7 +843,7 @@ function CategoryLedgerView({
                     ))}
                   </Pie>
                   <Tooltip content={<IncomeTooltip />} />
-                  <Legend />
+                  <Legend wrapperStyle={{ outline: 'none' }} />
                 </PieChart>
               </ResponsiveContainer>
             </div>
@@ -848,9 +880,9 @@ function CategoryLedgerView({
         ) : (
           <div className="space-y-6">
             {/* 円グラフ */}
-            <div className="bg-gradient-to-br from-rose-50/50 to-pink-50/50 rounded-lg p-4 md:p-6 border border-rose-200">
+            <div className="bg-gradient-to-br from-rose-50/50 to-pink-50/50 rounded-lg p-4 md:p-6 border border-rose-200 outline-none focus:outline-none [&_*]:outline-none [&_*]:focus:outline-none">
               <h3 className="text-base md:text-lg font-bold text-rose-800 mb-4 text-center">支出の内訳</h3>
-              <ResponsiveContainer width="100%" height={280}>
+              <ResponsiveContainer width="100%" height={isMobile ? 300 : 280}>
                 <PieChart>
                   <Pie
                     data={expensePieData}
@@ -858,7 +890,7 @@ function CategoryLedgerView({
                     cy="50%"
                     labelLine={false}
                     label={renderCustomLabel}
-                    outerRadius={60}
+                    outerRadius={isMobile ? 50 : 65}
                     fill="#8884d8"
                     dataKey="value"
                     style={{ outline: 'none' }}
@@ -869,7 +901,7 @@ function CategoryLedgerView({
                     ))}
                   </Pie>
                   <Tooltip content={<ExpenseTooltip />} />
-                  <Legend />
+                  <Legend wrapperStyle={{ outline: 'none' }} />
                 </PieChart>
               </ResponsiveContainer>
             </div>
