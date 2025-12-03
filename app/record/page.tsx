@@ -32,8 +32,8 @@ export default function RecordPage() {
     new Date().toISOString().split('T')[0]
   )
   const [accountId, setAccountId] = useState('1')
-  const [fromAccountId, setFromAccountId] = useState('1')
-  const [toAccountId, setToAccountId] = useState('2')
+  const [fromAccountId, setFromAccountId] = useState('2')
+  const [toAccountId, setToAccountId] = useState('1')
   const [loading, setLoading] = useState(false)
   const [receiptImage, setReceiptImage] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
@@ -437,32 +437,23 @@ export default function RecordPage() {
               </div>
             )}
 
-            {/* 移動元・移動先（移動の場合） */}
+            {/* 移動方向（移動の場合） */}
             {type === 'transfer' && (
-              <>
-                <div className="mb-6">
-                  <label className="block text-gray-700 font-bold mb-2">移動元</label>
-                  <select
-                    value={fromAccountId}
-                    onChange={(e) => setFromAccountId(e.target.value)}
-                    className="w-full p-3 border border-gray-300 rounded-lg"
-                  >
-                    <option value="1">現金</option>
-                    <option value="2">ゆうちょ銀行</option>
-                  </select>
-                </div>
-                <div className="mb-6">
-                  <label className="block text-gray-700 font-bold mb-2">移動先</label>
-                  <select
-                    value={toAccountId}
-                    onChange={(e) => setToAccountId(e.target.value)}
-                    className="w-full p-3 border border-gray-300 rounded-lg"
-                  >
-                    <option value="1">現金</option>
-                    <option value="2">ゆうちょ銀行</option>
-                  </select>
-                </div>
-              </>
+              <div className="mb-6">
+                <label className="block text-gray-700 font-bold mb-2">種別</label>
+                <select
+                  value={`${fromAccountId}-${toAccountId}`}
+                  onChange={(e) => {
+                    const [from, to] = e.target.value.split('-')
+                    setFromAccountId(from)
+                    setToAccountId(to)
+                  }}
+                  className="w-full p-3 border border-gray-300 rounded-lg"
+                >
+                  <option value="2-1">引き出し（ゆうちょ銀行→現金）</option>
+                  <option value="1-2">預け入れ（現金→ゆうちょ銀行）</option>
+                </select>
+              </div>
             )}
 
             {/* 領収書画像アップロード（支出の場合のみ） */}

@@ -632,7 +632,7 @@ export default function MembersPage() {
                 />
               </div>
               <p className="text-sm text-gray-600 text-center mb-3">
-                新しいメンバーにQRコードをスキャンしてもらい、
+                新しいメンバーにQRを読み取ってもらい、
                 <br />
                 ログイン画面にアクセスしてもらいましょう
               </p>
